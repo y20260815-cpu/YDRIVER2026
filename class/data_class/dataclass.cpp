@@ -412,8 +412,7 @@ void data_class::ten_millisec_routine()
 //++++++++++++
 	float stop_pwm1=fabs(inputRaw.source_pwm.f1);
 	float stop_pwm2=fabs(inputRaw.source_pwm.f2);
-	uint8_t disable_pid=inputRaw.io.btn.disablePID;// (pidCONF.Kp<=0.001f) ? 1: 0;
-	pPWM->Update_PWM(disable_pid, inputRaw.target_pwm.f1, inputRaw.target_pwm.f2);
+	pPWM->Update_PWM(0, inputRaw.target_pwm.f1, inputRaw.target_pwm.f2);
 	pPWM->CheckBrakeState(stop_pwm1, stop_pwm2);
 
 //liftControl++
