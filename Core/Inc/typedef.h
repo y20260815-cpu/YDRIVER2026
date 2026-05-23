@@ -240,7 +240,7 @@ typedef union _MY_BUTTON {
   struct {
     uint8_t ioMsg : 2;
     uint8_t lift_Xud: 2;
-    uint8_t lift_Wud: 2;
+    uint8_t castUPDN: 2;
     uint8_t disablePID : 1;
     uint8_t emergency : 1;
   };
@@ -257,9 +257,9 @@ typedef struct _MY_IO
 typedef union _LIFT_BUTTON {
   struct {
     uint8_t lift_Xud: 2;
-    uint8_t lift_Wud: 2;
-    uint8_t lift_XudLimit: 2;
-    uint8_t lift_WudLimit: 2;
+    uint8_t castUPDN: 2;
+    uint8_t xliftLimit: 2;
+    uint8_t castLimit: 2;
   };
   uint8_t u8;
 } LIFT_BUTTON;

@@ -327,7 +327,7 @@ LIFT_BUTTON data_class::Get_localGPIO(){
 		rdata<<=1;
 		rdata|=!!(HAL_GPIO_ReadPin(pIO_AN_GPIO_Port, pIO_AN_Pin));
 		rdata %=3;
-		if(sysFlag.canReady) btn.lift_WudLimit=rdata;
+		if(sysFlag.canReady) btn.castLimit=rdata;
 		else{
 		//TBD for FNR switch
 		}
@@ -337,7 +337,7 @@ LIFT_BUTTON data_class::Get_localGPIO(){
 		rdata<<=1;
 		rdata|=!!(HAL_GPIO_ReadPin(pIO_BN_GPIO_Port, pIO_BN_Pin));
 		rdata %=3;
-		btn.lift_Wud=rdata;
+		btn.castUPDN=rdata;
 
 		rdata=0;
 		rdata|=!!(HAL_GPIO_ReadPin(pIO_CP_GPIO_Port, pIO_CP_Pin));
@@ -419,13 +419,13 @@ void data_class::ten_millisec_routine()
 	if(pPWM->brake_on_flag && (inputRaw.io.btn.ioMsg==0))
 	{
 		LIFT_BUTTON llift;
-		//printf("lift_control lift_Wud[%d] lift_Xud[%d]\r\n",local_lift.lift_Wud, local_lift.lift_Xud);
-		llift.lift_Wud=(local_lift.lift_Wud)?local_lift.lift_Wud:inputRaw.io.btn.lift_Wud;
-		if(local_lift.lift_WudLimit==1 && llift.lift_Wud==1) llift.lift_Wud=0;
-		if(local_lift.lift_WudLimit==2 && llift.lift_Wud==2) llift.lift_Wud=0;
+		//printf("lift_control castUPDN[%d] lift_Xud[%d] castLimit[%d]\r\n",local_lift.castUPDN, local_lift.lift_Xud, local_lift.castLimit);
+		llift.castUPDN=(local_lift.castUPDN)?local_lift.castUPDN:inputRaw.io.btn.castUPDN;
+		if(local_lift.castLimit==1 && llift.castUPDN==1) llift.castUPDN=0;
+		if(local_lift.castLimit==2 && llift.castUPDN==2) llift.castUPDN=0;
 
 		llift.lift_Xud=(local_lift.lift_Xud)?local_lift.lift_Xud:inputRaw.io.btn.lift_Xud;
-		lift_control(llift.lift_Xud, llift.lift_Wud);
+		lift_control(llift.lift_Xud, llift.castUPDN);
 	}
 	//pSpary control
 	if(inputRaw.io.btn.ioMsg==2 && PWR_ON_Flg){
@@ -564,7 +564,7 @@ void data_class::onesec_routine()
 			batt.use_battery_voltage,batt.measure_emb_resister, batt.measure_m1_current, batt.measure_m2_current, batt.measure_m12_current);
 //	printf("ex_pwm1[%04d] ex_pwm1[%04d] state[%d]\r\n",gMAIN.ex_pwm1,  gMAIN.ex_pwm2, gMAIN.flg_state.u8);
 	printf("HOLD_Emergency[%d] emb_delay[%d] forward[%.1f^%.1f]\r\n", HOLD_Emergency,brake_delay, set_foreward, set_backward);
-	printf("[BUTTON] JENHUJIN1[%d] stopBTN_lr[%d] lift_Xud[%d] lift_Wud[%d]\r\n",board_io.toggle.jenhujin, board_io.toggle.t_sw, board_io.btn.lift_Xud, board_io.btn.lift_Wud);
+	printf("[BUTTON] JENHUJIN1[%d] stopBTN_lr[%d] lift_Xud[%d] lift_Wud[%d]\r\n",board_io.toggle.jenhujin, board_io.toggle.t_sw, board_io.btn.lift_Xud, board_io.btn.castUPDN);
 	printf("inport[%x] stop[%d][%d] \r\n", board_io.toggle.u8,  gMAIN.flg_state.stop1, gMAIN.flg_state.stop2);
 	printf("fet_temp[%d/%d] motor_temp[%d/%d] battery_voltage[%.f|%d]\r\n",batt.fet_temp,ladcValue[4], batt.motor_temp,ladcValue[5], batt.measure_battery_voltage, ladcValue[7]);
 	printf("vr[%.2f/%.2f] rpm[%.1f|%.1f] target_rpm[%.1f|%.1f] eRPM[%.1f|%.1f] \r\n",
