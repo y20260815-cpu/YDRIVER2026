@@ -22,14 +22,15 @@ stm32flash::~stm32flash()
 	// TODO Auto-generated destructor stub
 }
 
-void stm32flash::save_to_flash_config(CONFIG_TOTAL config_data)
+void stm32flash::save_to_flash_config(SYSTEM_CONF config_data)
 {
+#if 0
 	int i;
 	uint8_t sum=0;
 	uint32_t mem_size;
 	FLASH_MEM_CONFIG mem_config;
 	volatile uint16_t mem_sz=sizeof(FLASH_MEM_CONFIG);
-	volatile uint16_t config_data_size=sizeof(CONFIG_TOTAL);
+	volatile uint16_t config_data_size=sizeof(SYSTEM_CONF);
 
 	mem_size=(mem_sz%4) ? ((mem_sz/4)+1)*4: mem_sz;
 	//uint8_t data[mem_size+1]={0,};
@@ -105,6 +106,9 @@ void stm32flash::save_to_flash_config(CONFIG_TOTAL config_data)
 	  }
 	  HAL_FLASH_OB_Lock();
 	  HAL_FLASH_Lock();
+#endif
+	(void)config_data;
+	printf("SYSTEM_CONF flash save ignored\r\n");
 }
 
 FLASH_MEM_CONFIG stm32flash::read_flash_config()
@@ -129,9 +133,10 @@ FLASH_MEM_CONFIG stm32flash::read_flash_config()
 }
 
 void stm32flash::Get_BackUP(){
+#if 0
 	FLASH_MEM_CONFIG mconfig;
 	//volatile uint16_t sz=sizeof(FLASH_MEM_CONFIG);
-	volatile uint16_t config_data_size=sizeof(CONFIG_TOTAL);
+	volatile uint16_t config_data_size=sizeof(SYSTEM_CONF);
 
 	uint8_t config_data_buf[config_data_size+1]={0,};
 	uint8_t i,sum;
@@ -143,33 +148,37 @@ void stm32flash::Get_BackUP(){
 		sum=sum+config_data_buf[i];
 	}
 	sum=sum&0xFF;
-#if 0 //0:For Debuging 메모리 초기값으로... 1: release
+#if 1 //0:For Debuging 메모리 초기값으로... 1: release
 	if(mconfig.stx==0xAA55 && sum==mconfig.checksum){
 		printf("\r\n@@@MEMORY [OK]~\r\n");
 		//memcpy(&pDataClass->cart_config, &mconfig.config_data, sizeof(CART_SETUP));
-		memcpy(&pDataClass->setup_data, &mconfig.config_data, sizeof(CONFIG_TOTAL));
-
+		memcpy(&sysConf, &mconfig.config_data, sizeof(SYSTEM_CONF));
 	}
 	else
 #endif
 	{
 		printf("\r\n@@@MEMORY [Fail]~\r\n");
-		memcpy(&pDataClass->setup_data, &setup_init, sizeof(CONFIG_TOTAL));
-		save_to_flash_config(pDataClass->setup_data);
+		memcpy(&sysConf, &sysConf_init, sizeof(SYSTEM_CONF));
+		save_to_flash_config(sysConf);
 	}
 	//uint16_t pData[32];
 	//memcpy(pData, &setup_init, sizeof(CONFIG_TOTAL));
 	//for(i=0;i<20;i++)printf("[%d][%d]\r\n", i,pData[i] );
 
-	pDataClass->brake_delay=pDataClass->setup_data.conf2.brake_delay;//.motor_op.emb_delay;
-	pDataClass->accel_rate=pDataClass->setup_data.conf2.accel/100.0f;//.motor_op.accel;
-	pDataClass->decel_rate=pDataClass->setup_data.conf2.decel/100.0f;
-	pDataClass->gamsok_idx=pDataClass->setup_data.conf2.brake_rate;
+	pDataClass->brake_delay=sysConf.brake_delay;
+	//pDataClass->gamsok_idx=sysConf.brake_rate;
+	//pDataClass->motor1_polarity=sysConf.motor1_polarity;
+	//pDataClass->motor2_polarity=sysConf.motor2_polarity;
+	//pDataClass->set_foreward=sysConf.foreward/100.0f;
+	//pDataClass->set_backward=sysConf.backward/100.0f;
 
 	SYSTEM_setup_data_ok=1;
-	printf("@@@ motor_polrarity(%d)(%d)\r\n",pDataClass->setup_data.conf1.motor1_polarity, pDataClass->setup_data.conf1.motor2_polarity );
-	printf("@@@ motor_FR[%d][%d] offset[%d]\r\n",pDataClass->setup_data.conf2.foreward, pDataClass->setup_data.conf2.backward, pDataClass->setup_data.conf2.tottle_offset);
-	printf("@@@ motor_Accel[%d] Decel[%d] \r\n",pDataClass->setup_data.conf2.accel, pDataClass->setup_data.conf2.decel);
-	printf("@@@ brake_delay[%d] accel[%.1f] decel[%.1f]\r\n",pDataClass->brake_delay, pDataClass->accel_rate, pDataClass->decel_rate);
+	//printf("@@@ motor_polrarity(%d)(%d)\r\n",sysConf.motor1_polarity, sysConf.motor2_polarity );
+	//printf("@@@ motor_FR[%d][%d] offset[%d]\r\n",sysConf.foreward, sysConf.backward, sysConf.tottle_offset);
+	//printf("@@@ motor_Accel[%d] Decel[%d] \r\n",sysConf.accel, sysConf.decel);
+	//printf("@@@ brake_delay[%d] accel[%.2f] decel[%.2f]\r\n",pDataClass->brake_delay, ACCEL_RATE, DECEL_RATE);
 
+#endif
+	SYSTEM_setup_data_ok=0;
+	printf("SYSTEM_CONF flash load ignored\r\n");
 }

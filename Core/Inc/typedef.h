@@ -27,7 +27,11 @@ enum ENUM_KIND_SWITCH{
 	SW_LIFT,
 	SW_BISANG,
 };
-
+enum ENUM_FM2000_KIND_SWITCH{
+	FM2000_FNR1=0,
+	FM2000_FNR2,
+	FM2000_BISANG,
+};
 
 enum ENUM_DIR_SWITCH_STATE {
 	CENTER=0,
@@ -247,6 +251,17 @@ typedef union _MY_BUTTON {
   uint8_t u8;
 } MY_BUTTON;
 
+typedef union _FM2000_BUTTON {
+  struct {
+    uint8_t FNR1: 2;
+    uint8_t FNR2: 2;
+    uint8_t x1:   2;
+    uint8_t x2 :  1;
+    uint8_t emergency : 1;
+  };
+  uint8_t u8;
+} FM2000_BUTTON;
+
 typedef struct _MY_IO
 {
     MY_TOGGLE toggle;
@@ -256,7 +271,7 @@ typedef struct _MY_IO
 
 typedef union _LIFT_BUTTON {
   struct {
-    uint8_t lift_Xud: 2;
+    uint8_t liftUPDN: 2;
     uint8_t castUPDN: 2;
     uint8_t xliftLimit: 2;
     uint8_t castLimit: 2;
@@ -461,11 +476,7 @@ typedef struct
 	uint16_t motor1_polarity;
 	uint16_t motor2_polarity;
 	uint16_t tbd;
-}SYSTEM_CONF1;
-
-typedef struct
-{
-	uint16_t idx;
+	uint16_t reserved;  // conf2.idx padding (설정기 호환용)
 	uint16_t tottle_offset;
 	uint16_t stop_slip;
 	uint16_t foreward;
@@ -475,40 +486,31 @@ typedef struct
 	uint16_t brake_delay;
 	uint16_t brake_rate;
 	uint16_t checkSum;
-}SYSTEM_CONF2;
+}SYSTEM_CONF;
 
 
-typedef struct
+const SYSTEM_CONF sysConf_init =
 {
-	SYSTEM_CONF1 conf1;
-	SYSTEM_CONF2 conf2;
-}CONFIG_TOTAL;
-
-
-
-const CONFIG_TOTAL setup_init =
-{
-	0,	//타이틀
-	0,	//BATTERY VOLTAGE 0:24V 1:48V
+	0,	//idx
+	1,	//BATTERY VOLTAGE 0:12V 1:24V 2:36V 3:48V
 	200,//Limit_CURRENT
-	90,//Limit MOTOR Temp
+	90,	//Limit MOTOR Temp
 	85,	//Limit FET Temp
 	23,	//Low BATTERY
-	1,//Wheel type
-	0,  //MOTOR1 극성
-	0, //MOTOR2 극성
-	99,//의미없음
-//-----------------------------
-	1,		//타이틀
-	300,	//Trottle Offset
-	80,		//stop_slip//pid_k-->stop_slip/100.0f
-	100,	//forward
-	80,		//backward
-	10,		//Accel
-	20, 	//Decel
-	400, 	//Brake Delay(ms)
-	5, 		//Brake Rate-양쪽바퀴 회전수 틀리게
-	99 //의미없음
+	1,	//Wheel type
+	0,	//MOTOR1 극성
+	0,	//MOTOR2 극성
+	99,	//tbd
+	0,	//reserved (conf2.idx padding)
+	300,//Trottle Offset
+	80,	//stop_slip
+	100,//forward
+	80,	//backward
+	10,	//Accel
+	20,	//Decel
+	400,//Brake Delay(ms)
+	5,	//Brake Rate
+	99	//checkSum
 };
 
 /////////////////////

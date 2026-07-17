@@ -18,8 +18,7 @@
 typedef struct
 {
     uint16_t stx;
-    //CART_SETUP config_data;
-    CONFIG_TOTAL config_data;
+    SYSTEM_CONF config_data;
     uint8_t checksum;
     uint8_t etx;
 }FLASH_MEM_CONFIG;
@@ -32,7 +31,7 @@ public:
 	virtual ~stm32flash();
 
 	FLASH_MEM_CONFIG read_flash_config();
-	void save_to_flash_config(CONFIG_TOTAL config_data);
+	void save_to_flash_config(SYSTEM_CONF config_data);
 	void Get_BackUP();
 
 };

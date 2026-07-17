@@ -78,7 +78,6 @@ class tja1050
 {
 private:
 	//uint32_t  id_change(uint32_t src);
-	void CAN_Request_EVT(uint8_t *req);
 	void CAN_Request_SAVE(uint32_t id, uint8_t *req);
 public:
 	tja1050();
@@ -89,7 +88,6 @@ public:
 	void put_canTxd(uint32_t tx_id, uint8_t *data);
 	void CAN_Request_Setup_Data();
 	void canSetConfig();
-	CONFIG_TOTAL setup_data;
 	BIT_CAN_FLAG canFlag;
 	CAN_UP_FLAG_DATA canUpFlag;
 	uint8_t canRcvBuff[8][8];

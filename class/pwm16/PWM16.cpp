@@ -8,12 +8,11 @@
 #include "PWM16.h"
 #include <math.h>
 
-#define FET_MAX 850
-#define PWM_DIRECT_CONTROL 100 //dead time
 
 PWM16 *pPWM;
 
-#define INTEGRAL_MAX_LIMIT 5000.0f  // 적분값 최대 제한
+#define INTEGRAL_MAX_LIMIT 500.0f   // 적분값 최대 제한 (Ki 기여 최대 0.024 수준 유지)
+#define PID_LOW_SPEED_EXIT_THRESHOLD 600.0f  // PID 탈출 임계값 (진입 500 / 탈출 600 히스테리시스)
 
 float PWM16::PID_Compute1(float error) {
 	float kp=pidCONF.Kp;
@@ -67,15 +66,7 @@ PWM16::PWM16()
 	m1_value=0.0f;
 	m2_value=0.0f;  // 초기화 추가
 	rpm.f1=0.0f;
-	rpm_model_bias.f1=rpm_model_bias.f2=0.0f;
-	rpm_measured.f1=rpm_measured.f2=0.0f;
-	speed_hold_trim_pwm.f1=speed_hold_trim_pwm.f2=0.0f;
 	rpm.f2=0.0f;  // 재부팅 직후 쓰레기값 방지
-	// 슬루 레이트 초기값: 0으로 초기화하지 않으면 쓰레기값에서 슬루 시작
-	ex_pwm1=ex_pwm2=ex_pwm3=ex_pwm4=0;
-	ex_pwm5=ex_pwm6=ex_pwm7=ex_pwm8=0;
-	set_pwm1=set_pwm2=set_pwm3=set_pwm4=0;
-	set_pwm5=set_pwm6=set_pwm7=set_pwm8=0;
 }
 
 PWM16::~PWM16()
@@ -102,13 +93,14 @@ void PWM16::PWM16_START()
 
 void PWM16::DisableAllFETs_Dual(){
 	htim2.Instance->CCR1=0;
-	htim2.Instance->CCR2=1024;
+	htim2.Instance->CCR2=1024;//invert
 	htim2.Instance->CCR3=0;
-	htim2.Instance->CCR4=1024;
+	htim2.Instance->CCR4=1024;//invert
+
 	htim3.Instance->CCR1=0;
-	htim3.Instance->CCR2=1024;
+	htim3.Instance->CCR2=1024;//invert
 	htim3.Instance->CCR3=0;
-	htim3.Instance->CCR4=1024;
+	htim3.Instance->CCR4=1024;//invert
 }
 
 void PWM16::Calibrate_BEMF_Offset() {
@@ -130,19 +122,19 @@ void PWM16::Calibrate_BEMF_Offset() {
 
     bemf_offset1 = (adc_raw1 / 4095.0f) * 3.3f / OPAMP_GAIN;
     bemf_offset2 = (adc_raw2 / 4095.0f) * 3.3f / OPAMP_GAIN;
+
     //printf("BEMF Offset Calibrated: bemf_offset1 = %.3f, bemf_offset2 = %.3f\r\n", bemf_offset1, bemf_offset2);
 }
 
 DoubleF_VALUE PWM16::Dual_Motor_GetVelocty(){
 	uint16_t adc_raw1, adc_raw2;
 	uint16_t sum1 = 0, sum2 = 0;
-	const int samples = BEMF_SAMPLE_COUNT;
+	const int samples = 10;
 	DoubleF_VALUE _rpm;
 	float BEMF_GAIN = MOTOR_MAX_RPM/24.0f;//pDataClass->batt.motor_spec_voltage;//150.0f; //3600rpm/24V
 	float vf1_measured, vf2_measured;
 	float vBEMF1, vBEMF2;
 	float m_rpm1,m_rpm2;
-
 	//offset를 정의 기존거(LM2904(2opAMP)-BEMF 수정한거)
 	//bemf_offset1=42.51f;
 	//bemf_offset2=42.01f;
@@ -150,16 +142,17 @@ DoubleF_VALUE PWM16::Dual_Motor_GetVelocty(){
 	//bemf_offset1=43.82f;
 	//bemf_offset2=43.29f;
     // offset 통일 (평균값 사용)
-    bemf_offset1 = 38.35f;  // (43.82 + 43.29) / 2
-    bemf_offset2 = 38.72f;  // 동일하게 설정
+    bemf_offset1 = 38.35f;
+    bemf_offset2 = 38.72f;
 
-    DisableAllFETs_Dual();
-	delay_us(5);//	waiting for stable
+	DisableAllFETs_Dual();
+	delay_us(5);//	waiting for stable (~1ms real: delay_us*0.5us@72MHz) //2000
 
     for (int i = 0; i < samples; i++) {
         pDataClass->Get_AdcData();
         sum1 += pDataClass->ladcValue[8];
         sum2 += pDataClass->ladcValue[9];
+ //       HAL_Delay(1); // 1ms 대기
     }
 
     adc_raw1 = sum1 / samples;
@@ -187,95 +180,42 @@ DoubleF_VALUE PWM16::Dual_Motor_GetVelocty(){
     if(m_rpm1>=MOTOR_MAX_RPM) m_rpm1=MOTOR_MAX_RPM;
     if(m_rpm2>=MOTOR_MAX_RPM) m_rpm2=MOTOR_MAX_RPM;
 
+    // Spike filter: 속도 '급락'만 차단 (BEMF 노이즈), 증가(가속)는 자유 통과
+    // 이전값 대비 크기가 40% 이상 갑자기 줄어들면 1샘플 노이즈로 판단
+    static float prev_bem_rpm1 = 0.0f, prev_bem_rpm2 = 0.0f;
+    float mag1 = fabsf(m_rpm1), prev_mag1 = fabsf(prev_bem_rpm1);
+    float mag2 = fabsf(m_rpm2), prev_mag2 = fabsf(prev_bem_rpm2);
+    if (m_rpm1 == 0.0f) {
+        prev_bem_rpm1 = 0.0f;
+    } else if (prev_mag1 > 0.0f && (prev_mag1 - mag1) > prev_mag1 * 0.40f) {
+        m_rpm1 = prev_bem_rpm1;  // sudden drop blocked: BEMF noise
+    } else {
+        prev_bem_rpm1 = m_rpm1;
+    }
+    if (m_rpm2 == 0.0f) {
+        prev_bem_rpm2 = 0.0f;
+    } else if (prev_mag2 > 0.0f && (prev_mag2 - mag2) > prev_mag2 * 0.40f) {
+        m_rpm2 = prev_bem_rpm2;  // sudden drop blocked: BEMF noise
+    } else {
+        prev_bem_rpm2 = m_rpm2;
+    }
+
 	_rpm.f1=m_rpm1;
 	_rpm.f2=m_rpm2;
     //cprintf(C_RED,"@@@@ vf1_measured: %.2f^%.2f rpm(%.0f|%.0f) vBEMF( %.2f| %.2f) vf_measured(%.2f|%.2f) bemf_offset(%.2f|%.2f)\r\n",vf1_measured, vf2_measured, _rpm.f1, _rpm.f2, vBEMF1, vBEMF2, vf1_measured, vf2_measured, bemf_offset1, bemf_offset2);
 	return _rpm;
 }
 
-float PWM16::Update_RPM_Channel(float current, float model, float bias)
+
+void PWM16::Dual_Motor_set_pwm10(MOTOR_DIRECTION dm_polar, DoubleF_VALUE fSetPwm, uint8_t disable_pid)
 {
-    float target = model + bias;
-    float alpha = (fabsf(target) > fabsf(current)) ? RPM_ESTIMATE_ACCEL_ALPHA : RPM_ESTIMATE_DECEL_ALPHA;
-    return current + ((target - current) * alpha);
-}
-
-void PWM16::Update_RPM_Bias(DoubleF_VALUE model_rpm, DoubleF_VALUE measured_rpm)
-{
-    auto update_bias = [](float model, float measured, float current_bias) -> float {
-        if ((fabsf(model) < MOTOR_MIN_RPM) || (model * measured <= 0.0f)) {
-            return current_bias * RPM_BIAS_DECAY;
-        }
-
-        float measured_bias = measured - model;
-        return current_bias + ((measured_bias - current_bias) * RPM_BIAS_BLEND_ALPHA);
-    };
-
-    rpm_model_bias.f1 = update_bias(model_rpm.f1, measured_rpm.f1, rpm_model_bias.f1);
-    rpm_model_bias.f2 = update_bias(model_rpm.f2, measured_rpm.f2, rpm_model_bias.f2);
-}
-
-void PWM16::Update_RPM_Estimator(DoubleF_VALUE fSetPwm)
-{
-    DoubleF_VALUE model_rpm;
-    model_rpm.f1 = fSetPwm.f1 * MOTOR_MAX_RPM;
-    model_rpm.f2 = fSetPwm.f2 * MOTOR_MAX_RPM;
-
-    if ((fabsf(model_rpm.f1) < MOTOR_MIN_RPM) || ((model_rpm.f1 * rpm_model_bias.f1) < 0.0f)) rpm_model_bias.f1 *= RPM_BIAS_DECAY;
-    if ((fabsf(model_rpm.f2) < MOTOR_MIN_RPM) || ((model_rpm.f2 * rpm_model_bias.f2) < 0.0f)) rpm_model_bias.f2 *= RPM_BIAS_DECAY;
-
-    rpm.f1 = Update_RPM_Channel(rpm.f1, model_rpm.f1, rpm_model_bias.f1);
-    rpm.f2 = Update_RPM_Channel(rpm.f2, model_rpm.f2, rpm_model_bias.f2);
-
-    if (fabsf(model_rpm.f1) <= (DEADZONE_THRESHOLD * MOTOR_MAX_RPM) && fabsf(rpm.f1) < RPM_ZERO_SNAP_THRESHOLD) {
-        rpm.f1 = 0.0f;
-        rpm_model_bias.f1 = 0.0f;
-    }
-    if (fabsf(model_rpm.f2) <= (DEADZONE_THRESHOLD * MOTOR_MAX_RPM) && fabsf(rpm.f2) < RPM_ZERO_SNAP_THRESHOLD) {
-        rpm.f2 = 0.0f;
-        rpm_model_bias.f2 = 0.0f;
-    }
-
-    if (speed_hold_confidence > 0) speed_hold_confidence--;
-
-    float duty_max = fmaxf(fabsf(fSetPwm.f1), fabsf(fSetPwm.f2));
-    bool bemf_allowed = !stop_throttle
-        && !brake_on_flag
-        && (emb_release_delay == 0)
-        && (duty_max >= BEMF_MEASURE_DUTY_MIN)
-        && (duty_max <= BEMF_ACTIVE_DUTY_MAX);
-
-    if (!bemf_allowed) {
-        bemf_measure_tick = 0;
-        return;
-    }
-
-    if (++bemf_measure_tick < BEMF_MEASURE_INTERVAL_TICK) {
-        return;
-    }
-    bemf_measure_tick = 0;
-
-    bemf_busy = 1;
-    DoubleF_VALUE measured_rpm = Dual_Motor_GetVelocty();
-    bemf_busy = 0;
-
-    rpm_measured = measured_rpm;
-    Update_RPM_Bias(model_rpm, measured_rpm);
-    speed_hold_confidence = SPEED_HOLD_CONFIDENCE_TICK;
-
-    rpm.f1 += (measured_rpm.f1 - rpm.f1) * RPM_MEASURE_BLEND_ALPHA;
-    rpm.f2 += (measured_rpm.f2 - rpm.f2) * RPM_MEASURE_BLEND_ALPHA;
-}
-
-void PWM16::Dual_Motor_set_pwm10(MOTOR_DIRECTION dm_polar, DoubleF_VALUE fSetPwm)
-{
-	int mLeftMotorPwm, mRigjtMotorPwm, pwm1,pwm2,pwm3,pwm4,pwm5,pwm6,pwm7,pwm8;
+	int mLeftMotorPwm, mRigjtMotorPwm;
+	int pwm1=0,pwm2=0,pwm3=0,pwm4=0,pwm5=0,pwm6=0,pwm7=0,pwm8=0;
 	uint8_t dir1, dir2;
-	//static uint16_t rpm_cnt=0;
+
 	mLeftMotorPwm =  (int)(fminf(fabsf(fSetPwm.f1), 1.0f) * FET_MAX);
     mRigjtMotorPwm = (int)(fminf(fabsf(fSetPwm.f2), 1.0f) * FET_MAX);
 
-//-----------------------------------------------------------------------
     // 부호 → 정방향(0), 역방향(1)
     uint8_t raw_dir1 = (fSetPwm.f1 >= 0.0f) ? 0 : 1;
     uint8_t raw_dir2 = (fSetPwm.f2 >= 0.0f) ? 0 : 1;
@@ -291,204 +231,69 @@ void PWM16::Dual_Motor_set_pwm10(MOTOR_DIRECTION dm_polar, DoubleF_VALUE fSetPwm
     }
     prev_direction1 = dir1;
     prev_direction2 = dir2;
-#if 0
+
 //BEMF++
-{
-    static uint8_t  high_duty_mode = 0;  // 0=BEMF측정, 1=PWM추정
-    static uint8_t  low_duty_cnt   = 0;  // 저duty 연속 횟수 (글리치 방지)
-    static uint16_t rpm_cnt        = 0;  // 측정 주기 카운터
-
-    float duty_max = fmaxf(fabsf(fSetPwm.f1), fabsf(fSetPwm.f2));
-
-    // 고속 진입: duty > 0.65 즉시 전환 (1회 글리치 방지)
-    if (!high_duty_mode && duty_max > 0.65f) {
-        high_duty_mode = 1;
-        low_duty_cnt   = 0;
-    }
-    // 저속 복귀: duty < 0.55 이 3회(30ms) 연속일 때만 전환 (순간 글리치 차단)
-    if (high_duty_mode) {
-        if (duty_max < 0.55f) {
-            if (++low_duty_cnt >= 3) { high_duty_mode = 0; low_duty_cnt = 0; }
-        } else {
-            low_duty_cnt = 0;
-        }
-    }
-
-        rpm_cnt++;
-        if (rpm_cnt > 2) {
-            rpm_cnt = 0;
-            float new_rpm1, new_rpm2;
-            if (!high_duty_mode) {
-                // 저속: BEMF 직접 측정
-                DoubleF_VALUE m = Dual_Motor_GetVelocty();
-                new_rpm1 = m.f1;
-                new_rpm2 = m.f2;
-            } else {
-                // 고속: PWM으로 RPM 추정 (FET OFF 없음)
-                new_rpm1 = fSetPwm.f1 * MOTOR_MAX_RPM;
-                new_rpm2 = fSetPwm.f2 * MOTOR_MAX_RPM;
-            }
-            // EMA 필터: 급격한 전환 완화
-            const float alpha = 0.3f;
-            rpm.f1 = rpm.f1 * (1.0f - alpha) + new_rpm1 * alpha;
-            rpm.f2 = rpm.f2 * (1.0f - alpha) + new_rpm2 * alpha;
-        }
-}
-//BEMF--
-#endif
-    Update_RPM_Estimator(fSetPwm);
-//M1
-	if(dir1==0){
-		pwm1=pwm2=mLeftMotorPwm;
-		pwm2=pwm1+PWM_DIRECT_CONTROL;
-		pwm3=pwm4=0;
-	}
-	else {
-		pwm3=pwm4=mLeftMotorPwm;
-		pwm4=pwm3+PWM_DIRECT_CONTROL;
-		pwm1=pwm2=0;
-	}
-//M2
-	if(dir2==0){
-		pwm5=pwm6=mRigjtMotorPwm;
-		pwm6=pwm5+PWM_DIRECT_CONTROL;
-		pwm7=pwm8=0;
-	}
-	else {
-		pwm7=pwm8=mRigjtMotorPwm;
-		pwm8=pwm7+PWM_DIRECT_CONTROL;
-		pwm5=pwm6=0;
-	}
-	//if(pwm==0)pwm1=pwm2=pwm3=pwm4=0;
-    set_pwm1 = pwm1;
-    set_pwm2 = pwm2;    
-    set_pwm3 = pwm3;
-    set_pwm4 = pwm4;
-    set_pwm5 = pwm5;
-    set_pwm6 = pwm6;
-    set_pwm7 = pwm7;
-    set_pwm8 = pwm8;
-
-}
-
-void PWM16::pwm8_out(int pwm1, int pwm2, int pwm3, int pwm4, int pwm5, int pwm6, int pwm7, int pwm8)
-{
-    // Slew rate limiter: |diff| <= 10 → ±1/call, |diff| > 10 → ±5/call
-    auto slew = [](int cur, int tgt) -> int {
-        int diff = tgt - cur;
-        if (diff == 0) return cur;
-        int step = ((diff > 10) || (diff < -10)) ? 5 : 1;
-        return cur + ((diff > 0) ? step : -step);
-    };
-
-    int r1 = slew(ex_pwm1, pwm1);
-    int r2 = slew(ex_pwm2, pwm2);
-    int r3 = slew(ex_pwm3, pwm3);
-    int r4 = slew(ex_pwm4, pwm4);
-    int r5 = slew(ex_pwm5, pwm5);
-    int r6 = slew(ex_pwm6, pwm6);
-    int r7 = slew(ex_pwm7, pwm7);
-    int r8 = slew(ex_pwm8, pwm8);
-#if 0
-    // 10회 PWM 히스토리 기록 (슬루 적용 후 실제 출력값)
-    static int hist[10][8] = {};
-    static uint8_t idx = 0;
-
-    hist[idx][0]=r1; hist[idx][1]=r2; hist[idx][2]=r3; hist[idx][3]=r4;
-    hist[idx][4]=r5; hist[idx][5]=r6; hist[idx][6]=r7; hist[idx][7]=r8;
-
-    if (idx == 9) {
-        printf("--- PWM10 history (ch1~8) ---\r\n");
-        for (int r = 0; r < 10; r++) {
-            printf("[%2d] %4d %4d %4d %4d | %4d %4d %4d %4d\r\n",
-                r, hist[r][0], hist[r][1], hist[r][2], hist[r][3],
-                   hist[r][4], hist[r][5], hist[r][6], hist[r][7]);
-        }
-    }
-    idx = (idx + 1) % 10;
-#endif
-    htim3.Instance->CCR1 = r1;
-    htim3.Instance->CCR2 = r2;
-    htim3.Instance->CCR3 = r3;
-    htim3.Instance->CCR4 = r4;
-
-    htim2.Instance->CCR1 = r5;
-    htim2.Instance->CCR2 = r6;
-    htim2.Instance->CCR3 = r7;
-    htim2.Instance->CCR4 = r8;
-
-    ex_pwm1 = r1;  ex_pwm2 = r2;  ex_pwm3 = r3;  ex_pwm4 = r4;
-    ex_pwm5 = r5;  ex_pwm6 = r6;  ex_pwm7 = r7;  ex_pwm8 = r8;
-}
-
-float PWM16::Apply_SpeedHold_Channel(float raw_pwm, float out_pwm, float target_rpm, float current_rpm, float *trim_pwm, uint8_t *active_flag)
-{
-    float cmd_abs = fabsf(raw_pwm);
-    float target_abs = fabsf(target_rpm);
-    float current_abs = fabsf(current_rpm);
-    bool hold_enabled = (cmd_abs >= SPEED_HOLD_ENABLE_DUTY_MIN) && !brake_on_flag && !stop_throttle;
-    bool same_direction = (target_abs > MOTOR_MIN_RPM) && ((target_rpm * current_rpm) > 0.0f);
-
-    if (!hold_enabled || !same_direction) {
-        *trim_pwm += (0.0f - *trim_pwm) * SPEED_HOLD_TRIM_ALPHA;
-        if (fabsf(*trim_pwm) < 0.001f) *trim_pwm = 0.0f;
-        *active_flag = 0;
-        return out_pwm;
-    }
-
-    float overspeed_rpm = current_abs - target_abs;
-    float desired_trim = 0.0f;
-    if (overspeed_rpm > 0.0f) {
-        desired_trim = fminf(overspeed_rpm * OVERSPEED_TRIM_GAIN, OVERSPEED_TRIM_MAX);
-    }
-
-    *trim_pwm += (desired_trim - *trim_pwm) * SPEED_HOLD_TRIM_ALPHA;
-
-    float sign = (raw_pwm >= 0.0f) ? 1.0f : -1.0f;
-    float adjusted_pwm = out_pwm - (sign * (*trim_pwm));
-
-    if ((speed_hold_confidence > 0) && (overspeed_rpm > OVERSPEED_BRAKE_RPM) && (cmd_abs > 0.25f)) {
-        float counter_torque = fminf((overspeed_rpm - OVERSPEED_BRAKE_RPM) * OVERSPEED_COUNTER_TORQUE_GAIN, OVERSPEED_COUNTER_TORQUE_MAX);
-        float limit_pwm = -sign * counter_torque;
-        adjusted_pwm = (sign > 0.0f) ? fmaxf(adjusted_pwm, limit_pwm) : fminf(adjusted_pwm, limit_pwm);
+    if(!disable_pid) {
+        rpm = Dual_Motor_GetVelocty();
     } else {
-        adjusted_pwm = (sign > 0.0f) ? fmaxf(adjusted_pwm, 0.0f) : fminf(adjusted_pwm, 0.0f);
+        rpm.f1 = mLeftMotorPwm;
+        rpm.f2 = mRigjtMotorPwm;
     }
+//BEMF--
 
-    *active_flag = (overspeed_rpm > 0.0f) ? 1 : 0;
-    return adjusted_pwm;
+//    mRigjtMotorPwm=FET_MAX;
+//    mLeftMotorPwm=FET_MAX;//500;//0;
+//PWM=0 -> Active Freewheeling (BRAKE 방지)
+//	if(mLeftMotorPwm == 0 && mRigjtMotorPwm == 0){
+//		//DisableAllFETs_Dual();
+//		pwm1=pwm2=pwm3=pwm4=0;
+//		return;
+//	}
+//M1
+	if(mLeftMotorPwm > 0)
+	{
+		if(dir1==0){
+			pwm1=pwm2=mLeftMotorPwm;
+			pwm2=pwm1+PWM_DAED_TIME;
+		}
+		else {
+			pwm3=pwm4=mLeftMotorPwm;
+			pwm4=pwm3+PWM_DAED_TIME;
+		}
+	}
+	else{pwm2=pwm4=0;pwm1=pwm3=0;}
+//M2
+	if(mRigjtMotorPwm > 0)
+	{
+		if(dir2==0){
+			pwm5=pwm6=mRigjtMotorPwm;
+			pwm6=pwm5+PWM_DAED_TIME;
+		}
+		else {
+			pwm7=pwm8=mRigjtMotorPwm;
+			pwm8=pwm7+PWM_DAED_TIME;
+		}
+	}
+	else{pwm6=pwm8=0;pwm5=pwm7=0;}
+	//if(pwm==0)pwm1=pwm2=pwm3=pwm4=0;
+	htim3.Instance->CCR1=pwm1;
+	htim3.Instance->CCR2=pwm2;
+	htim3.Instance->CCR3=pwm3;
+	htim3.Instance->CCR4=pwm4;
+
+	htim2.Instance->CCR1=pwm5;
+	htim2.Instance->CCR2=pwm6;
+	htim2.Instance->CCR3=pwm7;
+	htim2.Instance->CCR4=pwm8;
 }
 
-DoubleF_VALUE PWM16::Apply_SpeedHold(DoubleF_VALUE raw_target_pwm, DoubleF_VALUE out_pwm, DoubleF_VALUE current_rpm_adj)
-{
-    DoubleF_VALUE adjusted_pwm = out_pwm;
-
-    adjusted_pwm.f1 = Apply_SpeedHold_Channel(
-        raw_target_pwm.f1,
-        adjusted_pwm.f1,
-        target_rpm.f1,
-        current_rpm_adj.f1,
-        &speed_hold_trim_pwm.f1,
-        &speed_hold_active1
-    );
-
-    adjusted_pwm.f2 = Apply_SpeedHold_Channel(
-        raw_target_pwm.f2,
-        adjusted_pwm.f2,
-        target_rpm.f2,
-        current_rpm_adj.f2,
-        &speed_hold_trim_pwm.f2,
-        &speed_hold_active2
-    );
-
-    return adjusted_pwm;
-}
-
-
-DoubleF_VALUE PWM16::pidCalibration(DoubleF_VALUE input, DoubleF_VALUE pid_pwm)
+DoubleF_VALUE PWM16::pidCalibration(uint8_t disable_pid, DoubleF_VALUE input, DoubleF_VALUE pid_pwm)
 {
     DoubleF_VALUE result;
     
+    if (disable_pid) {
+        result = input;
+    } else {
         result.f1 = input.f1 + pid_pwm.f1;
         result.f2 = input.f2 + pid_pwm.f2;
         
@@ -497,6 +302,7 @@ DoubleF_VALUE PWM16::pidCalibration(DoubleF_VALUE input, DoubleF_VALUE pid_pwm)
         if (result.f1 < -1.0f) result.f1 = -1.0f;
         if (result.f2 > 1.0f) result.f2 = 1.0f;
         if (result.f2 < -1.0f) result.f2 = -1.0f;
+    }
     
     return result;
 }
@@ -507,10 +313,9 @@ void PWM16::Update_PWM(uint8_t disable_pid, float target_pwm1, float target_pwm2
 	DoubleF_VALUE set_pwm;
     DoubleF_VALUE raw_target_pwm;
     DoubleF_VALUE out_pwm;
-    (void)disable_pid;
 
-    md_polarity.m1_dir = 0;
-    md_polarity.m2_dir = 0;
+    md_polarity.m1_dir = pDataClass->motor1_polarity;
+    md_polarity.m2_dir = pDataClass->motor2_polarity;
 	brake_delay_timeout_init=pDataClass->brake_delay/10;
 
 	// NOTE: CheckBrakeState는 ten_millisec_routine()에서 Update_PWM 호출 후 별도 호출됨
@@ -518,16 +323,15 @@ void PWM16::Update_PWM(uint8_t disable_pid, float target_pwm1, float target_pwm2
 
 	raw_target_pwm.f1 = target_pwm1;  // -1.0~1.0
 	raw_target_pwm.f2 = target_pwm2;
-
-	// 모터별 독립 PID 정지 판단 (한쪽만 0이어도 해당 모터 PID 동결)
-	bool m1_zero_cmd = (fabsf(raw_target_pwm.f1) <= DEADZONE_THRESHOLD);
-	bool m2_zero_cmd = (fabsf(raw_target_pwm.f2) <= DEADZONE_THRESHOLD);
-
-	if (stop_throttle || m1_zero_cmd) integral1 = 0;
-	if (stop_throttle || m2_zero_cmd) integral2 = 0;
 	
-    float current_rpm1  = rpm.f1;
-    float current_rpm2  = rpm.f2;
+	// 스로틀 정지 구간에서는 PID 적분 동결 (Anti-windup)
+	if (stop_throttle) {
+		integral1 = 0;
+		integral2 = 0;
+	}
+
+    float current_rpm1  = pDataClass->inputRaw.rpm.f1;
+    float current_rpm2  = pDataClass->inputRaw.rpm.f2;
 
     // 보호: 비정상 rpm 값 방지
     if (isnan(current_rpm1) || fabsf(current_rpm1) > 100000.0f) current_rpm1 = 0.0f;
@@ -540,26 +344,41 @@ void PWM16::Update_PWM(uint8_t disable_pid, float target_pwm1, float target_pwm2
     // 에러 계산 시 방향 일관성을 위해 current_rpm에 polar 보정 적용
     float current_rpm1_adj = (md_polarity.m1_dir==0) ? current_rpm1 : -current_rpm1;
     float current_rpm2_adj = (md_polarity.m2_dir==0) ? current_rpm2 : -current_rpm2;
-    DoubleF_VALUE current_rpm_adj = {current_rpm1_adj, current_rpm2_adj};
 
     error_rpm.f1=(target_rpm.f1 - current_rpm1_adj);
     error_rpm.f2=(target_rpm.f2 - current_rpm2_adj);
     
-    // 스로틀 정지 시 PID 완전 비활성화 - 모터별 독립 처리
-    pid_pwm.f1 = (stop_throttle || m1_zero_cmd) ? 0.0f : PID_Compute1(error_rpm.f1);
-    pid_pwm.f2 = (stop_throttle || m2_zero_cmd) ? 0.0f : PID_Compute2(error_rpm.f2);
+    // 스로틀 정지 시 PID 완전 비활성화
+    if (disable_pid || stop_throttle) {
+        pid_pwm.f1 = 0.0f;
+        pid_pwm.f2 = 0.0f;
+    }
+    else {
+        pid_pwm.f1 = PID_Compute1(error_rpm.f1);
+        pid_pwm.f2 = PID_Compute2(error_rpm.f2);
+    }
 
+    // PID 출력 폭주 방지: 최대 보정량 ±0.2f 제한 (2중 안전망)
+    pid_pwm.f1 = fmaxf(fminf(pid_pwm.f1, 0.2f), -0.2f);
+    pid_pwm.f2 = fmaxf(fminf(pid_pwm.f2, 0.2f), -0.2f);
 
-    // PID 출력 보정 적용 - pid_pwm은 이미 모터별로 0 처리되어 있음
-    if(stop_throttle && m1_zero_cmd && m2_zero_cmd){
+    // [전속도 PID] 저속/고속 구분 없이 스로틀 입력이 있으면 항상 PID 보정 적용
+    // - 고속 부하 보상: 스로틀 80%에서 부하로 RPM 저하 시 자동 보정
+    // - 스로틀 100% 포화 구간은 클램프로 인해 보정 불가 (물리적 한계)
+    // - stop_throttle 구간은 적분 windup 방지를 위해 비활성
+
+#if 1
+    // PID 출력 보정 적용: 전속도 구간 (스로틀 있을 때 항상)
+    if(disable_pid || stop_throttle){
         out_pwm = raw_target_pwm;
     }
     else
     {
-		 out_pwm=pidCalibration(raw_target_pwm, pid_pwm);
+		 out_pwm=pidCalibration(disable_pid, raw_target_pwm, pid_pwm);
     }
-
-    out_pwm = Apply_SpeedHold(raw_target_pwm, out_pwm, current_rpm_adj);
+#else
+    out_pwm=raw_target_pwm;
+#endif
 
     // 데드존 적용
     if (fabsf(out_pwm.f1) < DEADZONE_THRESHOLD) out_pwm.f1 = 0.0f;
@@ -575,15 +394,14 @@ void PWM16::Update_PWM(uint8_t disable_pid, float target_pwm1, float target_pwm2
    // printf("set_pwm[%.2f^%.2f] out_pwm[%.2f^%.2f] pid_pwm[%.2f^%.2f]\r\n",set_pwm.f1, set_pwm.f2, out_pwm.f1, out_pwm.f2, pid_pwm.f1, pid_pwm.f2);
 
     // EMB 체결 중이거나 EMB 해제 후 대기 중(0.2초)이면 PWM 차단 + 소프트스타트 초기화
+#if 0
     if(brake_on_flag || emb_release_delay > 0) {
         set_pwm.f1 = set_pwm.f2 = 0;
         integral1 = integral2 = 0;
-        speed_hold_trim_pwm.f1 = speed_hold_trim_pwm.f2 = 0.0f;
-        speed_hold_active1 = speed_hold_active2 = 0;
-        speed_hold_confidence = 0;
         emb_softstart_pwm = 0.0f;  // 해제 직후 0부터 시작
     }
-    else if (emb_softstart_pwm < 1.0f) {
+#endif
+    if (emb_softstart_pwm < 1.0f) {
         // 소프트스타트: PWM 크기 상한을 0→1.0으로 서서히 증가
         emb_softstart_pwm += EMB_SOFTSTART_RATE;
         if (emb_softstart_pwm > 1.0f) emb_softstart_pwm = 1.0f;
@@ -593,7 +411,8 @@ void PWM16::Update_PWM(uint8_t disable_pid, float target_pwm1, float target_pwm2
 
     //printf("POLARITY: m1_dir[%d] m2_dir[%d] jenhujin[%d]\r\n",  md_polarity.m1_dir, md_polarity.m2_dir, pDataClass->ctl_pwm.io.toggle.jenhujin);
     // 듀얼 모터 PWM 출력 적용
-    Dual_Motor_set_pwm10(md_polarity, set_pwm);
+    disable_pid=1;
+    Dual_Motor_set_pwm10(md_polarity, set_pwm, disable_pid);
 
 #if 0
     printf("@TogStop[%d^%d] curRPM[%+05d^%+05d] targetPWM[%+03.2f^%+03.2f] targetRPM[%+05d^%+05d] errRPM[%+05d^%+05d] pidPWM[%+03.2f^%+03.2f] setPWM[%+03.2f^%+03.2f] BK_delay[%02d] stopRPM[%d] stopTHRO[%d]  ovCNT[%02d] avrRPM[%+05d^%+05d] bakF[%d]\r\n",
@@ -708,9 +527,4 @@ float PWM16::get_m2_filter(float value)
 {
   m2_value=(m2_value*(1-FILTER_SENSITIVITY))+(value*FILTER_SENSITIVITY);
   return m2_value;
-}
-
-void PWM16::PWM_1ms(){
-   pwm8_out(set_pwm1, set_pwm2, set_pwm3, set_pwm4, set_pwm5, set_pwm6, set_pwm7, set_pwm8);
-
 }

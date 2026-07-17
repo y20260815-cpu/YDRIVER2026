@@ -92,42 +92,38 @@ void tja1050::put_canTxd(uint32_t tx_id, uint8_t *data)
 
 void tja1050::CAN_Request_Setup_Data()
 {
+#if 0
 	uint32_t Pub_ID=0x5B0;
 	uint8_t canTX_Data[8][8];
 	//uint16_t pData[64];
 	//if(!SYSTEM_setup_data_ok)return;
 	//printf("==== 달라고해서 보냄 CAN_Request_Setup_Data ====\r\n");
-	memcpy(canTX_Data, &pDataClass->setup_data, sizeof(CONFIG_TOTAL));
+	memcpy(canTX_Data, &sysConf, sizeof(SYSTEM_CONF));
 	for(uint8_t i=0;i<6;i++){
 		put_canTxd(Pub_ID+i, canTX_Data[i]);
-		printf("Setup_Data(i) (%04lX)\r\n", i, Pub_ID+i);
+		printf("Setup_Data(%d) (%04X)\r\n", i, Pub_ID+i);
 		for(volatile uint32_t delay = 0; delay < 72000 * 10; delay++);
 	}
-}
-
-void tja1050::CAN_Request_EVT(uint8_t *req)
-{
-	pDataClass->vcu_sdu.LeftMotor_velocity = BUILD_UINT16(req[1], req[0]);
-	pDataClass->vcu_sdu.canBrakeDelay=req[2] * 5;
-	pDataClass->vcu_sdu.canBattery=req[3];
-	pDataClass->vcu_sdu.RightMotor_velocity= BUILD_UINT16(req[5], req[4]);
-	pDataClass->vcu_sdu.toggle.u8=req[6];
-	pDataClass->vcu_sdu.btn.u8   =req[7];
-	can_process_flag=1;
-	//pDataClass->vcu_sdu.btn.disablePID=0;
-	//printf("#### CAN_Request_EVT [%d^%d] canBattery[%d] canBrakeDelay[%d] toggle[0x%04X] btn[0x%04X] disablePID[%d]\r\n", pDataClass->vcu_sdu.RightMotor_velocity, pDataClass->vcu_sdu.LeftMotor_velocity, pDataClass->vcu_sdu.canBattery, pDataClass->vcu_sdu.canBrakeDelay, pDataClass->vcu_sdu.toggle.u8, pDataClass->vcu_sdu.btn.u8 , pDataClass->vcu_sdu.btn.disablePID);
+#endif
+	canFlag.needTxsetupData = 0;
+	printf("SYSTEM_CONF setup response ignored\r\n");
 }
 
 
 void tja1050::canSetConfig(){
-	memcpy(&setup_data,&canRcvBuff,sizeof(CONFIG_TOTAL));
-	printf("@@@ setup_data.conf2.checkSum[%x]\r\n",setup_data.conf2.checkSum);
-	printf("@@@ battery_voltage[%d]  limit_current[%d] limit_motor_temp[%d]\r\n",setup_data.conf1.battery_voltage, setup_data.conf1.limit_current,setup_data.conf1.limit_motor_temp);
-	//printf("@@@ tottle_offset[%d] foreward[%d] backward[%d] brake_delay[%d]\r\n",setup_data.conf2.tottle_offset, setup_data.conf2.foreward, setup_data.conf2.backward, setup_data.conf2.brake_delay);
+#if 0
+	memcpy(&sysConf,&canRcvBuff,sizeof(SYSTEM_CONF));
+	printf("@@@ sysConf.checkSum[%x]\r\n",sysConf.checkSum);
+	printf("@@@ battery_voltage[%d]  limit_current[%d] limit_motor_temp[%d]\r\n",sysConf.battery_voltage, sysConf.limit_current,sysConf.limit_motor_temp);
+	//printf("@@@ tottle_offset[%d] foreward[%d] backward[%d] brake_delay[%d]\r\n",sysConf.tottle_offset, sysConf.foreward, sysConf.backward, sysConf.brake_delay);
+#endif
+	canFlag.needRxConfigData = 0;
+	printf("SYSTEM_CONF config apply ignored\r\n");
 }
 void tja1050::CAN_Request_SAVE(uint32_t id, uint8_t *req)
 {
-	CONFIG_TOTAL config;
+#if 0
+	SYSTEM_CONF config;
 	uint8_t buf[64];
 	uint8_t sum=0;
 	//printf("### CAN_Request_SAVE id[%x]\r\n", id);
@@ -173,12 +169,12 @@ void tja1050::CAN_Request_SAVE(uint32_t id, uint8_t *req)
 //	}
 	if(id==0x70C)
 	{
-		memcpy(buf,&canRcvBuff,sizeof(CONFIG_TOTAL));
-		memcpy(&config,&canRcvBuff,sizeof(CONFIG_TOTAL));
+		memcpy(buf,&canRcvBuff,sizeof(SYSTEM_CONF));
+		memcpy(&config,&canRcvBuff,sizeof(SYSTEM_CONF));
 		for(int i=0;i<38;i++)sum=sum+buf[i];
 		sum= sum &0xff;
-		printf("@@@@@@ sum[%x] config.conf2.checkSum[%x]\r\n",sum, config.conf2.checkSum);
-		if(sum==config.conf2.checkSum){
+		printf("@@@@@@ sum[%x] config.checkSum[%x]\r\n",sum, config.checkSum);
+		if(sum==config.checkSum){
 			pDataClass->sysFlag.SaveEEPROM=1;
 			pDataClass->sysFlag.savedConfigOK=1;
 			canFlag.needRxConfigData=1;
@@ -187,6 +183,12 @@ void tja1050::CAN_Request_SAVE(uint32_t id, uint8_t *req)
 			printf("##########[Error] Need Retry GetData============\r\n");
 		}
 	}
+#endif
+	(void)id;
+	(void)req;
+	canFlag.needRxConfigData = 0;
+	if(pDataClass != 0) pDataClass->sysFlag.savedConfigOK = 0;
+	printf("SYSTEM_CONF save ignored\r\n");
 }
 
 void tja1050::HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *CanHandle)
@@ -209,12 +211,9 @@ void tja1050::HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *CanHandle)
 	  CAN_Request_SAVE(RxHeader.StdId, RxData);
   }
   else if(RxHeader.StdId==0x700){
-	  canFlag.needTxsetupData=1;
+	  canFlag.needTxsetupData=0;
 	  canFlag.needRxConfigData=0;
-	  pDataClass->sysFlag.savedConfigOK=0;
-  }
-  else if(RxHeader.StdId==0x701){
-	  pDataClass->system_start_flag=1;
-	  CAN_Request_EVT(RxData);
+	  if(pDataClass != 0) pDataClass->sysFlag.savedConfigOK=0;
+	  printf("SYSTEM_CONF request ignored\r\n");
   }
 }

@@ -1,0 +1,1652 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YCB 듀얼 모터 드라이버 사용설명서 (NO CAN)</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', 'Malgun Gothic', sans-serif;
+            line-height: 1.7;
+            color: #222;
+            background: #f4f6fb;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            background: #fff;
+            box-shadow: 0 0 30px rgba(0,0,0,0.12);
+        }
+
+        header {
+            background: linear-gradient(135deg, #1a237e 0%, #283593 50%, #3949ab 100%);
+            color: white;
+            padding: 44px 30px 36px;
+            text-align: center;
+        }
+        header h1 { font-size: 2.2em; margin-bottom: 8px; letter-spacing: 1px; }
+        header .subtitle { font-size: 1.1em; opacity: 0.88; margin-bottom: 6px; }
+        header .version { font-size: 0.9em; opacity: 0.7; }
+
+        nav {
+            background: #283593;
+            padding: 0 20px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        nav ul { list-style: none; display: flex; flex-wrap: wrap; }
+        nav a {
+            color: #c5cae9;
+            text-decoration: none;
+            display: block;
+            padding: 12px 14px;
+            font-size: 0.88em;
+            transition: background 0.2s, color 0.2s;
+        }
+        nav a:hover { background: #3949ab; color: #fff; }
+
+        .content { padding: 40px 44px; }
+
+        section { margin-bottom: 55px; }
+
+        h2 {
+            color: #1a237e;
+            font-size: 1.75em;
+            margin-bottom: 18px;
+            padding-bottom: 8px;
+            border-bottom: 3px solid #3949ab;
+        }
+        h3 { color: #283593; font-size: 1.25em; margin: 28px 0 12px; }
+        h4 { color: #3949ab; font-size: 1.05em; margin: 18px 0 8px; }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 14px 0 22px;
+            font-size: 0.92em;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+        }
+        thead th {
+            background: #3949ab;
+            color: white;
+            padding: 11px 14px;
+            text-align: left;
+            font-weight: 600;
+        }
+        tbody td {
+            padding: 9px 14px;
+            border-bottom: 1px solid #e3e6f0;
+            vertical-align: top;
+        }
+        tbody tr:nth-child(even) { background: #f5f7ff; }
+        tbody tr:hover { background: #eef0fb; }
+
+        /* Callout boxes */
+        .info, .warning, .success, .danger {
+            padding: 14px 18px;
+            margin: 16px 0;
+            border-radius: 6px;
+            font-size: 0.93em;
+            line-height: 1.6;
+        }
+        .info    { background: #e3f2fd; border-left: 5px solid #1976d2; }
+        .warning { background: #fff8e1; border-left: 5px solid #f9a825; }
+        .success { background: #e8f5e9; border-left: 5px solid #388e3c; }
+        .danger  { background: #ffebee; border-left: 5px solid #c62828; }
+        .info strong    { color: #1565c0; }
+        .warning strong { color: #e65100; }
+        .success strong { color: #2e7d32; }
+        .danger strong  { color: #b71c1c; }
+
+        /* Code blocks */
+        .code-block {
+            background: #1e2235;
+            color: #cdd3f0;
+            padding: 18px 22px;
+            border-radius: 7px;
+            overflow-x: auto;
+            margin: 12px 0 20px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 0.87em;
+            line-height: 1.6;
+        }
+        .code-block .cmt { color: #6b7fc4; }
+        .code-block .kw  { color: #82b1ff; }
+        .code-block .num { color: #f48fb1; }
+        .code-block .str { color: #a5d6a7; }
+
+        /* TOC */
+        .toc {
+            background: #f0f3ff;
+            border: 1px solid #c5cae9;
+            border-radius: 8px;
+            padding: 22px 28px;
+            margin-bottom: 36px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0 30px;
+        }
+        .toc h3 { color: #1a237e; margin: 0 0 14px; grid-column: 1 / -1; }
+        .toc ul { list-style: none; margin: 0; }
+        .toc li { margin: 6px 0; }
+        .toc a { color: #3949ab; text-decoration: none; font-size: 0.93em; }
+        .toc a:hover { text-decoration: underline; color: #1a237e; }
+
+        /* Flow diagram */
+        .flow-box {
+            background: #f5f7ff;
+            border: 2px solid #c5cae9;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 16px 0;
+            font-family: 'Consolas', monospace;
+            font-size: 0.85em;
+            line-height: 1.55;
+            white-space: pre;
+            overflow-x: auto;
+        }
+
+        /* Feature grid */
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 16px;
+            margin: 16px 0;
+        }
+        .feature-card {
+            background: #f0f3ff;
+            padding: 18px 20px;
+            border-radius: 8px;
+            border-left: 4px solid #3949ab;
+        }
+        .feature-card h4 { color: #1a237e; margin-top: 0; font-size: 0.97em; }
+        .feature-card p, .feature-card li { font-size: 0.88em; color: #444; }
+        .feature-card ul { margin-left: 18px; }
+
+        ul, ol { margin: 10px 0 10px 28px; }
+        li { margin: 5px 0; }
+
+        footer {
+            background: #1a237e;
+            color: #c5cae9;
+            text-align: center;
+            padding: 26px 20px;
+            font-size: 0.88em;
+        }
+
+        @media (max-width: 768px) {
+            .content { padding: 20px 18px; }
+            header h1 { font-size: 1.5em; }
+            .toc { grid-template-columns: 1fr; }
+        }
+        @media print {
+            nav { position: relative; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+<header>
+    <h1>YCB 듀얼 모터 드라이버</h1>
+    <div class="subtitle">STM32F103RBTx 기반 차량용 모터 제어 펌웨어 — NO CAN 버전</div>
+    <div class="version">모델: black_driver_103rbtx_no_can &nbsp;|&nbsp; 문서 작성일: 2026-06-02</div>
+</header>
+
+<nav>
+    <ul>
+        <li><a href="#overview">1. 개요</a></li>
+        <li><a href="#specs">2. 사양</a></li>
+        <li><a href="#hardware">3. 하드웨어</a></li>
+        <li><a href="#timing">4. 제어 타이밍</a></li>
+        <li><a href="#control">5. 모터 제어</a></li>
+        <li><a href="#config">6. 시스템 설정</a></li>
+        <li><a href="#relay">7. 릴레이/밸브</a></li>
+        <li><a href="#safety">8. 보호 기능</a></li>
+        <li><a href="#flash">9. Flash 설정</a></li>
+        <li><a href="#debug">10. 디버그</a></li>
+        <li><a href="#can-setup">11. CAN 설정기</a></li>
+    </ul>
+</nav>
+
+<div class="content">
+
+    <!-- 목차 -->
+    <div class="toc">
+        <h3>목차</h3>
+        <ul>
+            <li><a href="#overview">1. 시스템 개요</a></li>
+            <li><a href="#specs">2. 시스템 사양</a></li>
+            <li><a href="#hardware">3. 하드웨어 구성 (핀, ADC, 타이머)</a></li>
+            <li><a href="#timing">4. 제어 루프 타이밍</a></li>
+            <li><a href="#control">5. 모터 제어 알고리즘</a></li>
+        </ul>
+        <ul>
+            <li><a href="#config">6. 시스템 설정 파라미터 (SYSTEM_CONF)</a></li>
+            <li><a href="#relay">7. 릴레이 및 밸브 제어</a></li>
+            <li><a href="#safety">8. 보호 기능</a></li>
+            <li><a href="#flash">9. Flash 설정 저장</a></li>
+            <li><a href="#debug">10. 시리얼 디버그 출력</a></li>
+            <li><a href="#can-setup">11. CAN 설정기 연결 및 설정 시퀀스</a></li>
+        </ul>
+    </div>
+
+    <!-- 1. 개요 -->
+    <section id="overview">
+        <h2>1. 시스템 개요</h2>
+
+        <p>YCB 듀얼 모터 드라이버(NO CAN)는 STM32F103RBTx 마이크로컨트롤러 기반의 차량용 듀얼 DC 모터 제어 시스템입니다.
+        포텐셔미터(스로틀), 전후진 스위치, 좌우정지 스위치를 통한 로컬 입력으로 동작하며,
+        CAN 버스가 연결되지 않은 단독 구동 환경에 최적화되어 있습니다.</p>
+
+        <div class="info">
+            <strong>NO CAN 버전 동작 방식</strong><br>
+            CAN 통신이 없거나 타임아웃이 발생하면(<code>canReady = 0</code>) 자동으로 로컬 입력(포텐셔미터·스위치)을 사용합니다.
+            CAN이 연결된 경우 DCU 정보(RPM, 온도, 배터리 전압)를 0x588 ID로 송신합니다.
+        </div>
+
+        <h3>주요 특징</h3>
+        <div class="feature-grid">
+            <div class="feature-card">
+                <h4>듀얼 모터 독립 제어</h4>
+                <ul>
+                    <li>모터1 / 모터2 개별 방향 및 속도 제어</li>
+                    <li>극성 반전 설정 (motor1/2_polarity)</li>
+                    <li>FET 데드타임 자동 확보 (방향 전환 시)</li>
+                </ul>
+            </div>
+            <div class="feature-card">
+                <h4>부드러운 가감속 (LogRamp)</h4>
+                <ul>
+                    <li>로그 기반 비선형 가속·감속 곡선</li>
+                    <li>accel / decel 파라미터로 응답 속도 조정</li>
+                    <li>오버슈팅 방지 처리</li>
+                </ul>
+            </div>
+            <div class="feature-card">
+                <h4>전속도 PID 부하 보상 제어</h4>
+                <ul>
+                    <li>BEMF 기반 실제 RPM 측정</li>
+                    <li>스로틀 입력이 있으면 전속도 구간에서 PID 보정 적용</li>
+                    <li>부하 증가로 RPM 저하 시 PWM 자동 증가 (최대 +20%)</li>
+                    <li>stop_throttle 시 적분 리셋 (Anti-windup)</li>
+                </ul>
+            </div>
+            <div class="feature-card">
+                <h4>다중 보호 기능</h4>
+                <ul>
+                    <li>FET 온도 과열 보호 (10초 연속 초과 시 차단)</li>
+                    <li>방향 전환 시 PWM 자동 0 (딜레이 보호)</li>
+                    <li>독립 워치독 (IWDG)</li>
+                </ul>
+            </div>
+            <div class="feature-card">
+                <h4>전자 브레이크 (EMB) 제어</h4>
+                <ul>
+                    <li>모터 정지 시 자동 EMB 체결</li>
+                    <li>EMB 해제 후 소프트 스타트 (200ms)</li>
+                    <li>brake_delay 파라미터 조정 가능</li>
+                </ul>
+            </div>
+            <div class="feature-card">
+                <h4>리프트 / 밸브 제어</h4>
+                <ul>
+                    <li>X축 리프트 UP/DN (SV1·SV2)</li>
+                    <li>W축 캐스트 UP/DN (CSV1·CSV2)</li>
+                    <li>리밋 스위치 연동 자동 정지</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <!-- 2. 사양 -->
+    <section id="specs">
+        <h2>2. 시스템 사양</h2>
+
+        <h3>2.1 MCU 사양</h3>
+        <table>
+            <thead><tr><th>항목</th><th>내용</th></tr></thead>
+            <tbody>
+                <tr><td>MCU</td><td>STM32F103RBTx (ARM Cortex-M3, 72MHz)</td></tr>
+                <tr><td>Flash</td><td>128KB (사용자 설정 저장: 0x0801F800)</td></tr>
+                <tr><td>SRAM</td><td>20KB</td></tr>
+                <tr><td>동작 전압</td><td>3.3V (내부), 24V 시스템 기본 권장</td></tr>
+                <tr><td>지원 배터리 전압</td><td>12V / 24V / 36V / 48V / 60V / 72V (설정 선택)</td></tr>
+                <tr><td>PWM 타이머</td><td>TIM2 (모터2), TIM3 (모터1) — 각 4채널, 총 8채널</td></tr>
+                <tr><td>ADC</td><td>ADC1 — 10채널 순차 변환 (DMA 없이 폴링)</td></tr>
+                <tr><td>통신</td><td>UART3 (디버그/printf), CAN (TJA1050, 선택적)</td></tr>
+                <tr><td>Watchdog</td><td>IWDG (Independent Watchdog Timer)</td></tr>
+            </tbody>
+        </table>
+
+        <h3>2.2 모터 제어 사양</h3>
+        <table>
+            <thead><tr><th>항목</th><th>값</th><th>비고</th></tr></thead>
+            <tbody>
+                <tr><td>최대 RPM</td><td>2100 RPM</td><td>MOTOR_MAX_RPM (typedef.h)</td></tr>
+                <tr><td>최소 감지 RPM</td><td>30 RPM</td><td>MOTOR_MIN_RPM (이하 0으로 처리)</td></tr>
+                <tr><td>PWM 분해능</td><td>0 ~ 850</td><td>FET_MAX = 850</td></tr>
+                <tr><td>PWM 데드타임</td><td>100 카운트</td><td>PWM_DIRECT_CONTROL = 100</td></tr>
+                <tr><td>데드존 임계값</td><td>0.05 (5%)</td><td>DEADZONE_THRESHOLD</td></tr>
+                <tr><td>정지 입력 임계값</td><td>0.1 (10%)</td><td>STOP_INPUT_PWM</td></tr>
+                <tr><td>PID 활성 속도 범위</td><td>전속도 (stop_throttle=0인 모든 구간)</td><td>저속 제한 제거</td></tr>
+                <tr><td>PID 최대 보정량</td><td>±0.20 (PWM 기준)</td><td>폭주 방지 클램프</td></tr>
+                <tr><td>PID Kp 기본값</td><td>0.8 (stop_slip=80)</td><td>stop_slip / 100.0f</td></tr>
+                <tr><td>PID Ki 기본값</td><td>0.1</td><td>하드코딩 (PWM16 생성자)</td></tr>
+                <tr><td>적분 제한</td><td>±500</td><td>INTEGRAL_MAX_LIMIT (Ki 기여 최대 0.024)</td></tr>
+                <tr><td>BEMF OPAMP 게인</td><td>0.0567</td><td>R2/R3 = 6.8kΩ / 120kΩ</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- 3. 하드웨어 -->
+    <section id="hardware">
+        <h2>3. 하드웨어 구성</h2>
+
+        <h3>3.1 시스템 블록 다이어그램</h3>
+
+        <style>
+        /* ── Block Diagram ── */
+        .bd-wrap {
+            background: #f5f7ff;
+            border: 2px solid #c5cae9;
+            border-radius: 12px;
+            padding: 28px 24px 22px;
+            margin: 16px 0 24px;
+            font-family: 'Malgun Gothic', 'Segoe UI', sans-serif;
+            font-size: 0.82em;
+        }
+        .bd-title {
+            text-align: center;
+            font-weight: 700;
+            font-size: 1.05em;
+            color: #1a237e;
+            margin-bottom: 20px;
+            letter-spacing: 0.5px;
+        }
+        .bd-grid {
+            display: grid;
+            grid-template-columns: 200px 1fr 200px;
+            grid-template-rows: auto auto auto;
+            gap: 0;
+            align-items: stretch;
+        }
+
+        /* columns */
+        .bd-left  { display: flex; flex-direction: column; gap: 0; justify-content: center; }
+        .bd-mid   { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 10px; }
+        .bd-right { display: flex; flex-direction: column; gap: 0; justify-content: flex-start; }
+
+        /* MCU box */
+        .bd-mcu {
+            background: linear-gradient(135deg, #1a237e, #3949ab);
+            color: white;
+            border-radius: 12px;
+            padding: 18px 22px;
+            text-align: center;
+            box-shadow: 0 4px 14px rgba(57,73,171,0.35);
+            min-width: 140px;
+        }
+        .bd-mcu .mcu-name { font-size: 1.15em; font-weight: 700; letter-spacing: 0.5px; }
+        .bd-mcu .mcu-sub  { font-size: 0.85em; opacity: 0.8; margin-top: 4px; }
+
+        /* Arrow lines */
+        .bd-arrow-h {
+            display: flex;
+            align-items: center;
+            width: 100%;
+            margin: 4px 0;
+        }
+        .bd-arrow-h .line {
+            flex: 1;
+            height: 2px;
+            background: #7986cb;
+        }
+        .bd-arrow-h .arrowhead-r::after {
+            content: '';
+            display: inline-block;
+            border: 5px solid transparent;
+            border-left: 7px solid #7986cb;
+        }
+        .bd-arrow-h .arrowhead-l::before {
+            content: '';
+            display: inline-block;
+            border: 5px solid transparent;
+            border-right: 7px solid #7986cb;
+        }
+        .bd-arrow-both { display: flex; align-items: center; width: 100%; margin: 3px 0; }
+        .bd-arrow-both .line { flex:1; height:2px; background:#7986cb; }
+        .bd-arrow-both .arr-l::before { content:''; display:inline-block; border:5px solid transparent; border-right:7px solid #7986cb; }
+        .bd-arrow-both .arr-r::after  { content:''; display:inline-block; border:5px solid transparent; border-left:7px solid #7986cb; }
+
+        /* signal chips */
+        .bd-chip {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 0;
+        }
+        .bd-chip .label {
+            background: #fff;
+            border: 1.5px solid #9fa8da;
+            border-radius: 5px;
+            padding: 3px 9px;
+            font-size: 0.88em;
+            color: #283593;
+            white-space: nowrap;
+            min-width: 80px;
+            text-align: center;
+        }
+        .bd-chip .pin {
+            color: #7986cb;
+            font-size: 0.78em;
+            white-space: nowrap;
+        }
+        .bd-chip .conn-line { flex:1; height:1.5px; background:#9fa8da; min-width: 8px; }
+
+        /* right-side output chips */
+        .bd-out-chip {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 0;
+        }
+        .bd-out-chip .conn-line { width: 14px; height: 1.5px; background: #9fa8da; flex-shrink: 0; }
+        .bd-out-chip .pin  { color: #7986cb; font-size: 0.78em; white-space: nowrap; }
+        .bd-out-chip .label {
+            background: #fff;
+            border: 1.5px solid #9fa8da;
+            border-radius: 5px;
+            padding: 3px 8px;
+            font-size: 0.86em;
+            color: #283593;
+            white-space: nowrap;
+        }
+
+        /* color variants */
+        .bd-chip .label.motor  { border-color: #43a047; color: #1b5e20; background: #f1f8e9; }
+        .bd-chip .label.relay  { border-color: #e65100; color: #bf360c; background: #fff3e0; }
+        .bd-chip .label.comm   { border-color: #0277bd; color: #01579b; background: #e1f5fe; }
+        .bd-chip .label.adc    { border-color: #6a1b9a; color: #4a148c; background: #f3e5f5; }
+        .bd-chip .label.gpio   { border-color: #558b2f; color: #33691e; background: #f9fbe7; }
+        .bd-out-chip .label.motor  { border-color: #43a047; color: #1b5e20; background: #f1f8e9; }
+        .bd-out-chip .label.relay  { border-color: #e65100; color: #bf360c; background: #fff3e0; }
+        .bd-out-chip .label.comm   { border-color: #0277bd; color: #01579b; background: #e1f5fe; }
+
+        /* group separators */
+        .bd-sep { height: 10px; }
+        .bd-group-label {
+            font-size: 0.75em;
+            color: #9e9e9e;
+            padding: 4px 0 2px 2px;
+            font-style: italic;
+        }
+
+        /* bottom row: CAN + UART spans full width */
+        .bd-bottom {
+            grid-column: 1 / -1;
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin-top: 18px;
+            padding-top: 14px;
+            border-top: 1.5px dashed #c5cae9;
+        }
+        .bd-bottom .bd-chip { gap: 8px; }
+
+        @media (max-width: 700px) {
+            .bd-grid { grid-template-columns: 1fr; }
+            .bd-mid  { padding: 12px 0; }
+        }
+        </style>
+
+        <div class="bd-wrap">
+            <div class="bd-title">YCB 듀얼 모터 드라이버 (NO CAN)</div>
+            <div class="bd-grid">
+
+                <!-- LEFT: ADC inputs + GPIO inputs -->
+                <div class="bd-left">
+                    <div class="bd-group-label">ADC 입력</div>
+                    <div class="bd-chip">
+                        <div class="label adc">포텐셔미터</div>
+                        <div class="pin">ADC0</div>
+                        <div class="conn-line"></div>
+                    </div>
+                    <div class="bd-chip">
+                        <div class="label adc">리밋 VR</div>
+                        <div class="pin">ADC1</div>
+                        <div class="conn-line"></div>
+                    </div>
+                    <div class="bd-chip">
+                        <div class="label adc">M1 전류</div>
+                        <div class="pin">ADC2</div>
+                        <div class="conn-line"></div>
+                    </div>
+                    <div class="bd-chip">
+                        <div class="label adc">M2 전류</div>
+                        <div class="pin">ADC3</div>
+                        <div class="conn-line"></div>
+                    </div>
+                    <div class="bd-chip">
+                        <div class="label adc">FET NTC</div>
+                        <div class="pin">ADC4</div>
+                        <div class="conn-line"></div>
+                    </div>
+                    <div class="bd-chip">
+                        <div class="label adc">MOT NTC</div>
+                        <div class="pin">ADC5</div>
+                        <div class="conn-line"></div>
+                    </div>
+                    <div class="bd-chip">
+                        <div class="label adc">배터리 V</div>
+                        <div class="pin">ADC7</div>
+                        <div class="conn-line"></div>
+                    </div>
+                    <div class="bd-chip">
+                        <div class="label adc">EMB 저항</div>
+                        <div class="pin">ADC6</div>
+                        <div class="conn-line"></div>
+                    </div>
+                    <div class="bd-chip">
+                        <div class="label adc">M1 BEMF</div>
+                        <div class="pin">ADC8</div>
+                        <div class="conn-line"></div>
+                    </div>
+                    <div class="bd-chip">
+                        <div class="label adc">M2 BEMF</div>
+                        <div class="pin">ADC9</div>
+                        <div class="conn-line"></div>
+                    </div>
+
+                    <div class="bd-sep"></div>
+                    <div class="bd-group-label">GPIO 입력</div>
+                    <div class="bd-chip">
+                        <div class="label gpio">전후진 SW</div>
+                        <div class="pin">PB13/14</div>
+                        <div class="conn-line"></div>
+                    </div>
+                    <div class="bd-chip">
+                        <div class="label gpio">좌우정지 SW</div>
+                        <div class="pin">PC13/12</div>
+                        <div class="conn-line"></div>
+                    </div>
+                    <div class="bd-chip">
+                        <div class="label gpio">리프트 SW</div>
+                        <div class="pin">PC0/1</div>
+                        <div class="conn-line"></div>
+                    </div>
+                    <div class="bd-chip">
+                        <div class="label gpio">비상 버튼</div>
+                        <div class="pin">PC2</div>
+                        <div class="conn-line"></div>
+                    </div>
+                </div>
+
+                <!-- CENTER: MCU -->
+                <div class="bd-mid">
+                    <div class="bd-mcu">
+                        <div class="mcu-name">STM32F103RBTx</div>
+                        <div class="mcu-sub">ARM Cortex-M3<br>72 MHz</div>
+                    </div>
+                </div>
+
+                <!-- RIGHT: PWM outputs + Relay outputs -->
+                <div class="bd-right">
+                    <div class="bd-group-label">PWM 출력</div>
+                    <div class="bd-out-chip">
+                        <div class="conn-line"></div>
+                        <div class="pin">TIM3</div>
+                        <div class="label motor">모터 1 (CH1~4)</div>
+                    </div>
+                    <div class="bd-out-chip">
+                        <div class="conn-line"></div>
+                        <div class="pin">TIM2</div>
+                        <div class="label motor">모터 2 (CH1~4)</div>
+                    </div>
+                    <div class="bd-out-chip">
+                        <div class="conn-line"></div>
+                        <div class="pin">PB2</div>
+                        <div class="label motor">FET Enable (pSD)</div>
+                    </div>
+
+                    <div class="bd-sep"></div>
+                    <div class="bd-group-label">릴레이 출력</div>
+                    <div class="bd-out-chip">
+                        <div class="conn-line"></div>
+                        <div class="pin">PD2</div>
+                        <div class="label relay">RY1 MC1 메인</div>
+                    </div>
+                    <div class="bd-out-chip">
+                        <div class="conn-line"></div>
+                        <div class="pin">PB4</div>
+                        <div class="label relay">RY2 MC2 보조</div>
+                    </div>
+                    <div class="bd-out-chip">
+                        <div class="conn-line"></div>
+                        <div class="pin">PB5</div>
+                        <div class="label relay">RY3 EMB 브레이크</div>
+                    </div>
+                    <div class="bd-out-chip">
+                        <div class="conn-line"></div>
+                        <div class="pin">PB6</div>
+                        <div class="label relay">RY4 M/SV 밸브</div>
+                    </div>
+                    <div class="bd-out-chip">
+                        <div class="conn-line"></div>
+                        <div class="pin">PB7</div>
+                        <div class="label relay">RY5 SV1 밸브</div>
+                    </div>
+                    <div class="bd-out-chip">
+                        <div class="conn-line"></div>
+                        <div class="pin">PB8</div>
+                        <div class="label relay">RY6 SV2 밸브</div>
+                    </div>
+                    <div class="bd-out-chip">
+                        <div class="conn-line"></div>
+                        <div class="pin">PB0</div>
+                        <div class="label relay">pWUP CSV1 UP</div>
+                    </div>
+                    <div class="bd-out-chip">
+                        <div class="conn-line"></div>
+                        <div class="pin">PB1</div>
+                        <div class="label relay">pWDN CSV2 DN</div>
+                    </div>
+                </div>
+
+                <!-- BOTTOM: CAN + UART -->
+                <div class="bd-bottom">
+                    <div class="bd-chip">
+                        <div class="label comm">CAN TJA1050</div>
+                        <div class="pin">↔ 0x588</div>
+                    </div>
+                    <div class="bd-chip">
+                        <div class="label comm">UART3</div>
+                        <div class="pin">→ 디버그 printf</div>
+                    </div>
+                </div>
+
+            </div><!-- /bd-grid -->
+        </div><!-- /bd-wrap -->
+
+        <h3>3.2 GPIO 입력 핀</h3>
+        <table>
+            <thead><tr><th>기능</th><th>핀</th><th>포트</th><th>값</th><th>설명</th></tr></thead>
+            <tbody>
+                <tr><td>전후진 스위치 (+)</td><td>PB13</td><td>pIO_AP</td><td rowspan="2">0=중립, 1=전진, 2=후진</td><td rowspan="2">jenhujin<br>GPIOB[13:14] → 2비트</td></tr>
+                <tr><td>전후진 스위치 (−)</td><td>PB14</td><td>pIO_AN</td></tr>
+                <tr><td>좌우정지 스위치 (+)</td><td>PC13</td><td>pIO_BP</td><td rowspan="2">0=전체정지, 1=왼쪽, 2=오른쪽, 3=없음</td><td rowspan="2">t_sw<br>GPIOC[13]/GPIOC[12]</td></tr>
+                <tr><td>좌우정지 스위치 (−)</td><td>PC12</td><td>pIO_BN</td></tr>
+                <tr><td>리프트 A (+)</td><td>PC0</td><td>pIO_CP</td><td rowspan="2">0=없음, 1=하한, 2=상한</td><td rowspan="2">lift_Xud (X축 리프트)</td></tr>
+                <tr><td>리프트 A (−)</td><td>PC1</td><td>pIO_CN</td></tr>
+                <tr><td>비상 버튼</td><td>PC2</td><td>pIO_DP</td><td>1=비상</td><td>HOLD_Emergency, EXTI 없음(폴링)</td></tr>
+                <tr><td>외부 입력 EXT13</td><td>PC3</td><td>pIO_DN_EXT13</td><td>—</td><td>EXTI3 인터럽트</td></tr>
+            </tbody>
+        </table>
+
+        <h3>3.3 GPIO 출력 핀 (릴레이 / FET)</h3>
+        <table>
+            <thead><tr><th>기능</th><th>핀</th><th>포트</th><th>ON 조건</th><th>설명</th></tr></thead>
+            <tbody>
+                <tr><td>MC1 메인 릴레이</td><td>PD2</td><td>pRY1</td><td>gMAIN.relay.MC1 = 1</td><td>전원 공급 주릴레이, 부팅 후 1.5초 뒤 ON</td></tr>
+                <tr><td>MC2 보조 릴레이</td><td>PB4</td><td>pRY2</td><td>gMAIN.relay.MC2 = 1</td><td>부팅 직후 ON (MC1보다 먼저)</td></tr>
+                <tr><td>EMB 전자 브레이크</td><td>PB5</td><td>pRY3</td><td>brake_on_flag = 0</td><td>모터 주행 중 HIGH, 정지 시 LOW(브레이크 체결)</td></tr>
+                <tr><td>모터M / 분무 밸브</td><td>PB6</td><td>pRY4</td><td>리프트 또는 분무 명령</td><td>리프트 M 또는 스프레이(cart_type에 따라)</td></tr>
+                <tr><td>SV1 솔레노이드</td><td>PB7</td><td>pRY5</td><td>리프트 UP/DN 명령</td><td>X축 리프트 UP 시 SET</td></tr>
+                <tr><td>SV2 솔레노이드</td><td>PB8</td><td>pRY6</td><td>리프트 DN 명령</td><td>X축 리프트 DN 시 SET</td></tr>
+                <tr><td>CSV1 캐스트 UP</td><td>PB0</td><td>pWUP</td><td>Cast UP 명령</td><td>W축 캐스트 상승</td></tr>
+                <tr><td>CSV2 캐스트 DN</td><td>PB1</td><td>pWDN</td><td>Cast DN 명령</td><td>W축 캐스트 하강</td></tr>
+                <tr><td>FET 게이트 Enable</td><td>PB2</td><td>pSD</td><td>항상 SET (전원 ON 후)</td><td>LOW = 전체 FET 차단</td></tr>
+            </tbody>
+        </table>
+
+        <h3>3.4 ADC 채널 구성</h3>
+        <table>
+            <thead><tr><th>인덱스</th><th>ADC CH / 핀</th><th>측정 대상</th><th>변환 공식</th><th>단위</th></tr></thead>
+            <tbody>
+                <tr><td>ladcValue[0]</td><td>CH0 / PA0</td><td>스로틀 포텐셔미터</td><td>scale_value(val, 1013, 3179) → 0.0~1.0</td><td>정규화 비율</td></tr>
+                <tr><td>ladcValue[1]</td><td>CH1 / PA1</td><td>속도 제한 포텐셔미터</td><td>val / 4096.0f → 0.0~1.0</td><td>정규화 비율</td></tr>
+                <tr><td>ladcValue[2]</td><td>CH2 / PA2</td><td>모터1 전류 측정</td><td>OPAMP 출력 → 전류 환산</td><td>A (float)</td></tr>
+                <tr><td>ladcValue[3]</td><td>CH3 / PA3</td><td>모터2 전류 측정</td><td>동일</td><td>A (float)</td></tr>
+                <tr><td>ladcValue[4]</td><td>CH4 / PA4</td><td>FET 방열판 온도 (NTC)</td><td>β=3435, R25=10kΩ → °C</td><td>°C (int8)</td></tr>
+                <tr><td>ladcValue[5]</td><td>CH5 / PA5</td><td>모터 온도 (NTC)</td><td>동일</td><td>°C (int8)</td></tr>
+                <tr><td>ladcValue[6]</td><td>CH6 / PA6</td><td>EMB 저항 측정</td><td>get_emb_resister(val[7], val[6]) → Ω</td><td>Ω (float)</td></tr>
+                <tr><td>ladcValue[7]</td><td>CH7 / PA7</td><td>배터리 전압</td><td>val × 3.3 / 4095 × 520 → V×10</td><td>V (×10)</td></tr>
+                <tr><td>ladcValue[8]</td><td>CH14 / PC4</td><td>모터1 BEMF</td><td>OPAMP 출력 → RPM 계산</td><td>RPM</td></tr>
+                <tr><td>ladcValue[9]</td><td>CH15 / PC5</td><td>모터2 BEMF</td><td>동일</td><td>RPM</td></tr>
+            </tbody>
+        </table>
+
+        <div class="warning">
+            <strong>스로틀 ADC 캘리브레이션</strong><br>
+            스로틀 유효 범위는 실측값 기준 <strong>1013 ~ 3179</strong>입니다.
+            이 범위 밖의 값은 0.0 또는 1.0으로 클램핑됩니다.
+            하드웨어 교체 시 <code>scale_value(ladcValue[0], 1013, 3179)</code> 호출 인수를 실측값으로 변경해야 합니다.
+        </div>
+
+        <h3>3.5 PWM 타이머 채널 할당</h3>
+        <table>
+            <thead><tr><th>모터</th><th>타이머</th><th>정방향 (dir=0)</th><th>역방향 (dir=1)</th></tr></thead>
+            <tbody>
+                <tr><td>모터1 (왼쪽)</td><td>TIM3</td><td>CCR1=CCR2=PWM, CCR2+=100, CCR3=CCR4=0</td><td>CCR3=CCR4=PWM, CCR4+=100, CCR1=CCR2=0</td></tr>
+                <tr><td>모터2 (오른쪽)</td><td>TIM2</td><td>CCR1=CCR2=PWM, CCR2+=100, CCR3=CCR4=0</td><td>CCR3=CCR4=PWM, CCR4+=100, CCR1=CCR2=0</td></tr>
+            </tbody>
+        </table>
+        <div class="info">
+            PWM 값이 0이면 <code>DisableAllFETs_Dual()</code>을 호출하여 액티브 프리휠링(Active Freewheeling)으로 처리합니다.
+            방향 전환 시 약 2.5μs(delay_us(5) × 0.5μs @72MHz)의 데드타임을 확보합니다.
+        </div>
+    </section>
+
+    <!-- 4. 제어 타이밍 -->
+    <section id="timing">
+        <h2>4. 제어 루프 타이밍</h2>
+
+        <table>
+            <thead><tr><th>주기</th><th>함수</th><th>주요 처리 내용</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td>1ms</td>
+                    <td><code>one_millisec_routine()</code></td>
+                    <td>현재 구현 비어 있음 (확장용 예약)</td>
+                </tr>
+                <tr>
+                    <td><strong>10ms</strong></td>
+                    <td><strong><code>ten_millisec_routine()</code></strong></td>
+                    <td>
+                        ① 로컬 GPIO 읽기(Get_localGPIO)<br>
+                        ② CAN 타임아웃 감소 / canReady 판정<br>
+                        ③ canReady=0 이면 ON_Board_INPUT() 실행 (ADC+스위치 읽기, target_pwm 계산)<br>
+                        ④ Update_PWM() → 모터 PWM 출력<br>
+                        ⑤ CheckBrakeState() → EMB 제어<br>
+                        ⑥ 리프트/밸브 제어<br>
+                        ⑦ 스프레이 제어<br>
+                        ⑧ 전원 ON 시 EMB 릴레이(RY3) 제어
+                    </td>
+                </tr>
+                <tr>
+                    <td>100ms</td>
+                    <td><code>hnd_millisec_routine()</code></td>
+                    <td>Flash 설정 저장 (SaveEEPROM 플래그), CAN DCU 정보 송신</td>
+                </tr>
+                <tr>
+                    <td>1s</td>
+                    <td><code>onesec_routine()</code></td>
+                    <td>ADC 온도·전압 측정, FET 과열 보호 카운터, 시리얼 진단 출력, 릴레이 상태 반영</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="info">
+            <strong>IWDG 리셋</strong>: 메인 루프에서 주기적으로 <code>HAL_IWDG_Refresh()</code>를 호출합니다.
+            루프가 멈추면 약 수 초 이내에 MCU 리셋됩니다.
+        </div>
+    </section>
+
+    <!-- 5. 모터 제어 알고리즘 -->
+    <section id="control">
+        <h2>5. 모터 제어 알고리즘</h2>
+
+        <h3>5.1 전체 제어 흐름</h3>
+        <div class="flow-box">
+[스로틀 ADC] ──scale_value()──┐
+[리밋  ADC]  ──val/4096 ──────┤
+[전후진SW (jenhujin)]──────────┤
+[좌우정지SW (t_sw)]────────────┤
+                               ▼
+               Calcu_sourcePWM(throttle, limit, jenhujin_key, t_sw)
+               │  Calcu_limit() → control_value (0.2~1.0 구간 리매핑)
+               │  jenhujin=0(중립) → 스핀 처리
+               │  jenhujin=1/2 + t_sw=1/2 → gamsok_ratio[brake_rate] 적용
+               ▼
+               Calcu_targetPWM()
+               │  극성(polarity) XOR로 실제 방향 판단
+               │  방향별 fwd_ratio / bwd_ratio 적용
+               │  FET보호 or 방향전환중 → src.f1=f2=0
+               │  PWM_UpdateRoutine() × 2 (LogRamp)
+               │  jenhujin_confirmed=2(후진) → ×(-1)
+               ▼
+           inputRaw.target_pwm (.f1 / .f2)
+               ▼
+           Update_PWM(disable_pid=0, target_pwm1, target_pwm2)
+               │  BEMF 측정 → 현재 RPM
+               │  target_rpm = target_pwm × MOTOR_MAX_RPM
+               │  error_rpm = target_rpm − current_rpm_adj
+               │  stop_throttle=0 → PID 보정 적용 (전속도)
+               │  stop_throttle=1 → 오픈루프 + 적분 리셋
+               │  pid_pwm 클램프 ±0.2f → 폭주 방지
+               │  데드존 적용 (|pwm| &lt; 0.05 → 0)
+               ▼
+           Dual_Motor_set_pwm10() → TIM2 / TIM3 CCR 직접 기록</div>
+
+        <h3>5.2 LogRamp (가감속 곡선)</h3>
+        <p><code>PWM_UpdateRoutine()</code>은 매 10ms 루프마다 호출되어 현재 PWM 값을 목표값에 점진적으로 추종시킵니다.</p>
+        <div class="code-block">
+<span class="cmt">// LogRampStep: 로그 기반 스텝 계산</span>
+k = (|target| &lt; |current|) ? decel_rate : accel_rate;
+step = k × log(|error| + 1);          <span class="cmt">// error가 클수록 큰 스텝</span>
+
+<span class="cmt">// 공식: accel_rate = sysConf.accel / 500.0f</span>
+<span class="cmt">//        decel_rate = sysConf.decel / 500.0f</span>
+<span class="cmt">// 기본값: accel=10 → 0.020,  decel=20 → 0.040</span>
+        </div>
+        <div class="info">
+            스로틀이 0(<code>stop_throttle=1</code>)이면 targetPWM을 0.0으로 강제 설정하여 감속 경로를 따라 자연스럽게 정지합니다.
+        </div>
+
+        <h3>5.3 전후진 비율 및 극성 처리</h3>
+        <p>전진/후진 입력에 따라 각 모터에 적용되는 최대 PWM 비율이 다릅니다. 모터 극성도 XOR 연산으로 반영합니다.</p>
+        <div class="code-block">
+<span class="cmt">// jenhujin_key: 1=전진, 2=후진</span>
+uint8_t intent_fwd = (jenhujin_key == 1) ? 1 : 0;
+uint8_t m1_fwd     = intent_fwd ^ (motor1_polarity ? 1 : 0);
+uint8_t m2_fwd     = intent_fwd ^ (motor2_polarity ? 1 : 0);
+
+src.f1 *= m1_fwd ? fwd_ratio : bwd_ratio;   <span class="cmt">// fwd_ratio = foreward/100</span>
+src.f2 *= m2_fwd ? fwd_ratio : bwd_ratio;   <span class="cmt">// bwd_ratio = backward/100</span>
+        </div>
+
+        <h3>5.4 좌우정지 스위치와 감속 비율 테이블</h3>
+        <p>전진/후진 주행 중 좌우정지 스위치(t_sw)가 눌리면 해당 모터에 <code>gamsok_ratio[brake_rate]</code>를 곱합니다.</p>
+        <table>
+            <thead><tr><th>brake_rate (인덱스)</th><th>gamsok_ratio 값</th><th>동작</th></tr></thead>
+            <tbody>
+                <tr><td>0</td><td>−1.0</td><td>100% 역방향 (급격한 역전 선회)</td></tr>
+                <tr><td>1</td><td>−0.8</td><td>80% 역방향</td></tr>
+                <tr><td>2</td><td>−0.6</td><td>60% 역방향</td></tr>
+                <tr><td>3</td><td>−0.4</td><td>40% 역방향</td></tr>
+                <tr><td>4</td><td>−0.2</td><td>20% 역방향</td></tr>
+                <tr style="background:#e8f5e9"><td><strong>5 (기본값)</strong></td><td><strong>0.0</strong></td><td><strong>한쪽 모터 완전 정지 → 차동 선회</strong></td></tr>
+                <tr><td>6</td><td>0.2</td><td>20% 전방향 유지 (완만한 선회)</td></tr>
+                <tr><td>7</td><td>0.4</td><td>40% 전방향 유지</td></tr>
+                <tr><td>8</td><td>0.6</td><td>60% 전방향 유지</td></tr>
+                <tr><td>9</td><td>0.8</td><td>80% 전방향 유지</td></tr>
+                <tr><td>10</td><td>1.0</td><td>동속 유지 (직진과 동일)</td></tr>
+                <tr><td>11</td><td>1.0</td><td>동속 유지 (동일)</td></tr>
+            </tbody>
+        </table>
+        <div class="info">
+            <strong>중립(jenhujin=0) 상태에서 t_sw 입력 시</strong>: 스핀 모드.<br>
+            t_sw=1 → M1 역방향, M2 정방향 (좌 스핀) / t_sw=2 → M1 정방향, M2 역방향 (우 스핀)
+        </div>
+
+        <h3>5.5 방향 전환 보호</h3>
+        <p>전후진 스위치가 변경되면 <code>JENHUJIN_SWITCH_CHANGE_FLAG=1</code>이 설정되어 PWM 출력을 0으로 강제합니다.
+        양쪽 모터 PWM이 모두 0.2 미만으로 낮아진 뒤에야 새로운 방향이 반영됩니다.</p>
+
+        <h3>5.6 BEMF 기반 RPM 측정</h3>
+        <p>모터 구동 중 잠시 FET를 모두 OFF 시키고 역기전력(BEMF)을 ADC8/9로 측정합니다.</p>
+        <div class="code-block">
+BEMF_GAIN = MOTOR_MAX_RPM / 24.0f = <span class="num">87.5</span> RPM/V
+
+<span class="cmt">// BEMF 전압 계산</span>
+vf = (adc / 4095.0f) × 3.3V / OPAMP_GAIN       <span class="cmt">// OPAMP_GAIN = 0.0567</span>
+vBEMF = vf − bemf_offset                         <span class="cmt">// offset: 38.35 / 38.72 (측정값)</span>
+if (vBEMF &gt; 0) vBEMF *= 2.91f                   <span class="cmt">// 정방향 보정 계수</span>
+rpm = vBEMF × BEMF_GAIN
+
+<span class="cmt">// 스파이크 필터: 이전 값 대비 40% 이상 급감 시 직전 값 유지</span>
+        </div>
+        <div class="warning">
+            <strong>BEMF 측정 주의</strong><br>
+            FET가 OFF 되는 순간(약 2.5μs) 동안 모터 전류가 순단됩니다.
+            BEMF 오프셋(38.35, 38.72)은 하드코딩된 값으로, 하드웨어 변경 시 재조정이 필요합니다.
+        </div>
+
+        <h3>5.7 전속도 PID 부하 보상 제어</h3>
+
+        <h4>5.7.1 왜 저속 제한이 문제였는가</h4>
+        <p>이전 구현은 목표 RPM &lt; 500인 경우에만 PID를 활성화했습니다.
+        이 방식에서는 스로틀 80% 주행 중 경사로나 적재 부하로 RPM이 500 이하로 떨어져도
+        PID가 고속 구간이라 판단해 보정을 하지 않는 문제가 있었습니다.</p>
+
+        <h4>5.7.2 폭주·진동 위험 및 해결</h4>
+        <table>
+            <thead><tr><th>문제</th><th>원인</th><th>해결</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td>적분 Windup 폭주</td>
+                    <td>INTEGRAL_MAX_LIMIT=5000 → Ki 최대 기여 0.238<br>(target_pwm 0.2 → 순간 0.44)</td>
+                    <td>INTEGRAL_MAX_LIMIT를 <strong>500</strong>으로 축소<br>Ki 최대 기여 0.024 수준 유지</td>
+                </tr>
+                <tr>
+                    <td>경계 진동<br>(PID on↔off 반복)</td>
+                    <td>500 RPM 경계에서 PID 활성·비활성 반복</td>
+                    <td>저속 제한 자체를 <strong>제거</strong><br>항상 PID 적용으로 경계 없음</td>
+                </tr>
+                <tr>
+                    <td>고속 부하 미보상</td>
+                    <td>스로틀 80% 고속 구간에서 RPM 저하 시 무보정</td>
+                    <td>전속도 PID 활성<br>부하 시 자동 PWM 증가</td>
+                </tr>
+                <tr>
+                    <td>스로틀 100% 포화</td>
+                    <td>PWM=1.0f이면 +보정 후에도 클램프→ 1.0f<br>물리적 한계</td>
+                    <td>해결 불가 (설계적 한계)<br>→ 최대 부하 여유분을 foreward 설정으로 확보</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h4>5.7.3 전속도 PID 동작 공식</h4>
+        <div class="code-block">
+<span class="cmt">// PI 계산 (PID_Compute1/2)</span>
+integral += error;                                <span class="cmt">// Anti-windup: ±500 클램핑</span>
+pid_pwm = rpm_to_pwm_scale × (Kp × error + Ki × integral)
+        <span class="cmt">// rpm_to_pwm_scale = 1 / 2100 ≈ 0.000476</span>
+
+<span class="cmt">// pid_pwm 폭주 방지 클램프 (2중 안전망)</span>
+pid_pwm = clamp(pid_pwm, −0.2f, +0.2f)
+
+<span class="cmt">// 적용 조건: 스로틀 입력이 있는 모든 구간</span>
+out_pwm = (!stop_throttle) ? raw_pwm + pid_pwm
+                           : raw_pwm  <span class="cmt">// stop_throttle 시 오픈루프 + 적분 리셋</span>
+        </div>
+
+        <h4>5.7.4 실제 부하 보상 예시</h4>
+        <table>
+            <thead><tr><th>조건</th><th>계산</th><th>결과</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td>스로틀 80%<br>목표 1680 RPM<br>부하로 실제 1400 RPM</td>
+                    <td>error = 1680 − 1400 = 280<br>pid_pwm ≈ 0.000476 × 0.8 × 280 = <strong>+0.107</strong></td>
+                    <td>out_pwm = 0.8 + 0.107 = <strong>0.907</strong><br>→ 부하 자동 보상 ✓</td>
+                </tr>
+                <tr style="background:#fce4ec">
+                    <td>스로틀 100%<br>목표 2100 RPM<br>부하로 실제 1800 RPM</td>
+                    <td>error = 300<br>pid_pwm = +0.114<br>out_pwm = 1.0 + 0.114 → 클램프</td>
+                    <td>out_pwm = <strong>1.0</strong> (포화)<br>→ 보상 불가 (물리적 한계)</td>
+                </tr>
+            </tbody>
+        </table>
+        <div class="warning">
+            <strong>스로틀 100% 구간 부하 보상 방법</strong><br>
+            foreward / backward 파라미터를 100% 미만으로 설정하면 최대 PWM에 여유가 생겨 PID가 보정할 수 있는 공간이 확보됩니다.<br>
+            예: foreward=80 → 스로틀 100%에서 PWM=0.8 → 부하 시 최대 0.8+0.2=<strong>1.0까지 보정 가능</strong>
+        </div>
+    </section>
+
+    <!-- 6. 시스템 설정 -->
+    <section id="config">
+        <h2>6. 시스템 설정 파라미터 (SYSTEM_CONF)</h2>
+
+        <p>모든 설정값은 Flash 메모리(0x0801F800)에 저장됩니다.
+        설정기(외부 툴)로 변경하거나 sysConf_init 기본값이 적용됩니다.</p>
+
+        <table>
+            <thead>
+                <tr><th>파라미터</th><th>기본값</th><th>변환 공식</th><th>설명</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>battery_voltage</td><td>1</td><td>0=12V, 1=24V, 2=36V, 3=48V, 4=60V, 5=72V</td><td>배터리 전압 선택</td></tr>
+                <tr><td>limit_current</td><td>200</td><td>ADC 단위 직접 비교</td><td>최대 전류 제한값</td></tr>
+                <tr><td>limit_motor_temp</td><td>90</td><td>°C</td><td>모터 온도 경고 임계값</td></tr>
+                <tr><td>limit_fet_temp</td><td>85</td><td>°C</td><td>FET 온도 보호 임계값 (10초 초과 시 PWM 차단)</td></tr>
+                <tr><td>alarm_Battery</td><td>23</td><td>V</td><td>배터리 저전압 알람 전압</td></tr>
+                <tr><td>cart_type</td><td>1</td><td>0/1</td><td>차량 타입 (밸브 제어 방식 분기)</td></tr>
+                <tr><td>motor1_polarity</td><td>0</td><td>0=정방향, 1=반전</td><td>모터1 물리적 방향 반전</td></tr>
+                <tr><td>motor2_polarity</td><td>0</td><td>0=정방향, 1=반전</td><td>모터2 물리적 방향 반전</td></tr>
+                <tr><td>tottle_offset</td><td>300</td><td>ADC 오프셋 값</td><td>스로틀 영점 오프셋 (현재 코드에서 직접 사용 안 함)</td></tr>
+                <tr style="background:#fffde7">
+                    <td><strong>stop_slip</strong></td><td><strong>80</strong></td>
+                    <td><strong>Kp = stop_slip / 100.0 → 0.8</strong></td>
+                    <td><strong>PID P게인. 클수록 저속 RPM 오차 보정 강도 증가</strong></td>
+                </tr>
+                <tr><td>foreward</td><td>100</td><td>fwd_ratio = foreward / 100.0 → 1.0</td><td>전진 방향 최대 PWM 비율 (100 = 100%)</td></tr>
+                <tr><td>backward</td><td>80</td><td>bwd_ratio = backward / 100.0 → 0.8</td><td>후진 방향 최대 PWM 비율 (80 = 80%)</td></tr>
+                <tr><td>accel</td><td>10</td><td>accel_rate = accel / 500.0 → 0.02</td><td>가속 응답 속도 (클수록 빠른 가속)</td></tr>
+                <tr><td>decel</td><td>20</td><td>decel_rate = decel / 500.0 → 0.04</td><td>감속 응답 속도 (클수록 빠른 감속)</td></tr>
+                <tr><td>brake_delay</td><td>400</td><td>ms 단위 직접 사용</td><td>EMB 체결 대기 시간 (ms)</td></tr>
+                <tr style="background:#fffde7">
+                    <td><strong>brake_rate</strong></td><td><strong>5</strong></td>
+                    <td><strong>gamsok_idx = brake_rate → gamsok_ratio[5] = 0.0</strong></td>
+                    <td><strong>좌우정지 스위치 동작 시 감속 비율 테이블 인덱스 (5=완전정지)</strong></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="success">
+            <strong>설정값 적용 시점</strong><br>
+            <code>stm32flash::Get_BackUP()</code> (부팅 시) 또는 <code>data_class::power_on()</code> 호출 시 sysConf 값이
+            각 런타임 변수(accel_rate, decel_rate, gamsok_idx, set_foreward, set_backward, Kp 등)에 반영됩니다.
+            설정 변경 후에는 반드시 재부팅하거나 power_on()을 다시 호출해야 효과가 나타납니다.
+        </div>
+    </section>
+
+    <!-- 7. 릴레이/밸브 -->
+    <section id="relay">
+        <h2>7. 릴레이 및 밸브 제어</h2>
+
+        <h3>7.1 전원 ON 시퀀스</h3>
+        <div class="flow-box">
+power_on() 호출
+  │
+  ├─ MC2(RY2) SET  ─── (보조 릴레이 먼저 ON)
+  ├─ HAL_Delay(1000ms)
+  ├─ MC1(RY1) SET  ─── (메인 릴레이 ON)
+  ├─ HAL_Delay(500ms)
+  ├─ FET Enable(pSD) SET
+  └─ brake_on_flag = 1  (초기 상태: EMB 체결)</div>
+
+        <h3>7.2 전자 브레이크 (EMB) 동작</h3>
+        <p>EMB는 RY3(pRY3)으로 제어됩니다. <code>brake_on_flag=0</code>이면 RY3 HIGH(브레이크 해제), <code>1</code>이면 RY3 LOW(브레이크 체결).</p>
+        <p><code>CheckBrakeState()</code>가 10ms마다 호출되어 두 모터의 source_pwm이 모두 0이 된 뒤 <code>brake_delay</code>ms 경과 시 EMB를 체결합니다.
+        EMB 해제 직후에는 200ms 소프트 스타트(emb_softstart_pwm: 0→1.0) 구간이 적용됩니다.</p>
+
+        <!-- ===== 7.2.1 브레이크 딜레이 상세 동작 ===== -->
+        <h4>7.2.1 브레이크 딜레이 상세 동작 흐름</h4>
+
+        <style>
+        /* ---- 단계 흐름 박스 ---- */
+        .bd-flow{display:flex;flex-wrap:wrap;gap:0;align-items:stretch;margin:16px 0;}
+        .bd-step{background:#1b2235;border:1.5px solid #3a4a7a;border-radius:8px;padding:11px 15px;min-width:145px;flex:1;position:relative;}
+        .bd-step .bd-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#3949ab;color:#fff;font-size:.75em;font-weight:700;margin-right:6px;vertical-align:middle;}
+        .bd-step .bd-title{font-weight:700;color:#c5cae9;font-size:.88em;}
+        .bd-step .bd-body{font-size:.79em;color:#9fa8da;margin-top:6px;line-height:1.6;}
+        .bd-step code{color:#80cbc4;background:transparent;font-size:.93em;}
+        .bd-arr{display:flex;align-items:center;padding:0 4px;color:#5c6bc0;font-size:1.5em;font-weight:700;align-self:center;}
+        .bd-note{background:#1a2a1a;border-left:3px solid #e53935;border-radius:5px;padding:8px 14px;font-size:.81em;color:#ef9a9a;margin-top:4px;}
+        /* ---- 타이밍 차트 ---- */
+        .tc-wrap{background:#0f1320;border-radius:12px;padding:22px 20px 18px;margin:20px 0;overflow-x:auto;font-family:'Malgun Gothic','Consolas',monospace;font-size:.8em;}
+        .tc-title{color:#7986cb;font-weight:700;font-size:.95em;margin-bottom:14px;letter-spacing:.3px;}
+        .tc-row{display:flex;align-items:center;margin-bottom:10px;}
+        .tc-label{color:#90a4ae;width:130px;flex-shrink:0;font-size:.85em;text-align:right;padding-right:12px;}
+        .tc-bar{display:flex;flex:1;height:26px;min-width:560px;position:relative;}
+        /* 각 세그먼트 */
+        .tc-seg{height:100%;display:flex;align-items:center;justify-content:center;font-size:.72em;font-weight:600;white-space:nowrap;overflow:hidden;}
+        .tc-hi{background:#1a5276;border:1px solid #2e86c1;color:#aed6f1;}
+        .tc-lo{background:#1c1c1c;border:1px solid #424242;color:#616161;}
+        .tc-cnt{background:#1a3a1a;border:1px solid #2e7d32;color:#a5d6a7;}
+        .tc-emb{background:#4a1a1a;border:1px solid #c62828;color:#ef9a9a;}
+        .tc-rel{background:#2a1f00;border:1px solid #f57f17;color:#ffe082;}
+        .tc-ss{background:#1a2a3a;border:1px solid #1565c0;color:#90caf9;}
+        .tc-norm{background:#1a3028;border:1px solid #2e7d32;color:#a5d6a7;}
+        /* 분리선 */
+        .tc-divline{width:2px;height:100%;background:#37474f;flex-shrink:0;}
+        /* 시간축 눈금 */
+        .tc-axis{display:flex;flex:1;min-width:560px;margin-left:142px;margin-top:2px;margin-bottom:10px;}
+        .tc-tick{flex:1;text-align:center;font-size:.72em;color:#546e7a;border-left:1px solid #263238;}
+        .tc-tick:last-child{border-right:1px solid #263238;}
+        /* 범례 */
+        .tc-legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;margin-left:142px;}
+        .tc-leg-item{display:flex;align-items:center;gap:5px;font-size:.78em;color:#90a4ae;}
+        .tc-leg-box{width:18px;height:12px;border-radius:3px;flex-shrink:0;}
+        </style>
+
+        <!-- 단계 흐름 -->
+        <div class="bd-flow">
+            <div class="bd-step">
+                <div><span class="bd-num">①</span><span class="bd-title">스로틀 OFF 감지</span></div>
+                <div class="bd-body">
+                    <code>|pwm| ≤ 0.05</code> → <code>m1_stop_pwm=1</code> / <code>m2_stop_pwm=1</code><br>
+                    두 모터 모두 성립 시 <code>stop_throttle=1</code>
+                </div>
+            </div>
+            <div class="bd-arr">→</div>
+            <div class="bd-step">
+                <div><span class="bd-num">②</span><span class="bd-title">RPM 감속 확인</span></div>
+                <div class="bd-body">
+                    <code>|avr_rpm| &lt; 400 RPM</code> 이 <b>10틱(100ms) 연속</b>이면<br>
+                    <code>m1_stop_rpm=1</code> / <code>m2_stop_rpm=1</code><br>
+                    → <code>stop_rpm_flag=1</code>
+                </div>
+            </div>
+            <div class="bd-arr">→</div>
+            <div class="bd-step">
+                <div><span class="bd-num">③</span><span class="bd-title">brake_delay 카운트다운</span></div>
+                <div class="bd-body">
+                    <code>brake_delay_timeout_init = brake_delay / 10</code> 틱<br>
+                    (예: 500ms → 50틱)<br>
+                    10ms 마다 <code>brake_delay_timeout--</code><br>
+                    → 0 도달 시 다음 단계
+                </div>
+                <div class="bd-note">⚠ <b>10ms 단위 정수 나눗셈</b> — brake_delay=506 → 실제 500ms<br>(1~9ms 이하는 버려짐)</div>
+            </div>
+            <div class="bd-arr">→</div>
+            <div class="bd-step">
+                <div><span class="bd-num">④</span><span class="bd-title">EMB 체결</span></div>
+                <div class="bd-body">
+                    <code>brake_on_flag=1</code><br>
+                    RY3(pRY3) → <b>LOW</b><br>
+                    PWM 출력 차단 (<code>set_pwm=0</code>)<br>
+                    PID 적분 리셋
+                </div>
+            </div>
+            <div class="bd-arr">→</div>
+            <div class="bd-step">
+                <div><span class="bd-num">⑤</span><span class="bd-title">재가동 감지</span></div>
+                <div class="bd-body">
+                    <code>|pwm| &gt; STOP_INPUT_PWM</code> 입력 시<br>
+                    <code>brake_on_flag=0</code> (EMB 해제)<br>
+                    <code>emb_release_delay = 20틱(200ms)</code><br>
+                    → 대기 + 소프트스타트
+                </div>
+            </div>
+            <div class="bd-arr">→</div>
+            <div class="bd-step">
+                <div><span class="bd-num">⑥</span><span class="bd-title">소프트스타트</span></div>
+                <div class="bd-body">
+                    EMB 해제 후 200ms PWM 차단 대기<br>
+                    이후 <code>emb_softstart_pwm</code> 0→1.0<br>
+                    매 10ms +5% (0.05f) → <b>200ms 만에 100%</b>
+                </div>
+            </div>
+        </div>
+
+        <!-- 타이밍 차트 -->
+        <div class="tc-wrap">
+            <div class="tc-title">▶ EMB 브레이크 딜레이 타이밍 차트 &nbsp;(brake_delay = 500ms 예시)</div>
+
+            <!-- 시간 눈금 (0ms ~ 1200ms 를 12칸) -->
+            <div class="tc-axis">
+                <div class="tc-tick">0</div><div class="tc-tick">100</div><div class="tc-tick">200</div>
+                <div class="tc-tick">300</div><div class="tc-tick">400</div><div class="tc-tick">500</div>
+                <div class="tc-tick">600</div><div class="tc-tick">700</div><div class="tc-tick">800</div>
+                <div class="tc-tick">900</div><div class="tc-tick">1100</div><div class="tc-tick">1200ms</div>
+            </div>
+
+            <!-- 스로틀 입력 -->
+            <div class="tc-row">
+                <div class="tc-label">스로틀 입력</div>
+                <div class="tc-bar">
+                    <div class="tc-seg tc-hi"  style="flex:1;">PWM 구동 중</div>
+                    <div class="tc-seg tc-lo"  style="flex:9;">OFF (|pwm|≤0.05) &nbsp;→ stop_throttle=1</div>
+                    <div class="tc-seg tc-hi"  style="flex:2;">재가동 입력</div>
+                </div>
+            </div>
+
+            <!-- RPM -->
+            <div class="tc-row">
+                <div class="tc-label">모터 RPM</div>
+                <div class="tc-bar">
+                    <div class="tc-seg tc-hi"  style="flex:1;">회전 중</div>
+                    <div class="tc-seg tc-cnt" style="flex:1;">감속 중</div>
+                    <div class="tc-seg tc-lo"  style="flex:1;font-size:.65em;">&lt;400rpm<br>×100ms</div>
+                    <div class="tc-seg tc-lo"  style="flex:7;color:#546e7a;">RPM 정지 (stop_rpm_flag=1)</div>
+                    <div class="tc-seg tc-cnt" style="flex:2;">회전 재개</div>
+                </div>
+            </div>
+
+            <!-- brake_delay 카운트 -->
+            <div class="tc-row">
+                <div class="tc-label">brake_delay 타이머</div>
+                <div class="tc-bar">
+                    <div class="tc-seg tc-lo"  style="flex:3;color:#546e7a;">대기 (stop_rpm_flag=0)</div>
+                    <div class="tc-seg tc-cnt" style="flex:5;">카운트다운 50틱 × 10ms = 500ms</div>
+                    <div class="tc-seg tc-lo"  style="flex:4;color:#546e7a;">리셋</div>
+                </div>
+            </div>
+
+            <!-- EMB (RY3) -->
+            <div class="tc-row">
+                <div class="tc-label">EMB / RY3</div>
+                <div class="tc-bar">
+                    <div class="tc-seg tc-hi"  style="flex:8;">HIGH — 브레이크 해제</div>
+                    <div class="tc-seg tc-emb" style="flex:2;font-weight:800;">LOW ★ 체결</div>
+                    <div class="tc-seg tc-hi"  style="flex:2;">HIGH — 해제</div>
+                </div>
+            </div>
+
+            <!-- PWM 출력 -->
+            <div class="tc-row">
+                <div class="tc-label">PWM 출력</div>
+                <div class="tc-bar">
+                    <div class="tc-seg tc-norm" style="flex:1;">정상</div>
+                    <div class="tc-seg tc-lo"   style="flex:7;color:#546e7a;">0 (브레이크 체결 또는 대기)</div>
+                    <div class="tc-seg tc-emb"  style="flex:2;">0 (체결 중)</div>
+                    <div class="tc-seg tc-rel"  style="flex:1;font-size:.7em;">차단<br>200ms</div>
+                    <div class="tc-seg tc-ss"   style="flex:1;font-size:.7em;">소프트<br>스타트</div>
+                    <div class="tc-seg tc-norm" style="flex:1;">정상</div>
+                </div>
+            </div>
+
+            <!-- 소프트스타트 -->
+            <div class="tc-row">
+                <div class="tc-label">emb_softstart_pwm</div>
+                <div class="tc-bar">
+                    <div class="tc-seg tc-norm" style="flex:1;">1.0</div>
+                    <div class="tc-seg tc-lo"   style="flex:9;color:#546e7a;">0.0 (브레이크 체결·대기·해제 대기)</div>
+                    <div class="tc-seg tc-rel"  style="flex:1;font-size:.7em;">200ms<br>대기</div>
+                    <div class="tc-seg tc-ss"   style="flex:1;font-size:.7em;">0→1.0<br>200ms</div>
+                    <div class="tc-seg tc-norm" style="flex:1;">1.0</div>
+                </div>
+            </div>
+
+            <!-- 범례 -->
+            <div class="tc-legend">
+                <div class="tc-leg-item"><div class="tc-leg-box tc-hi"></div> 구동/HIGH/정상</div>
+                <div class="tc-leg-item"><div class="tc-leg-box tc-lo"></div> 정지/LOW</div>
+                <div class="tc-leg-item"><div class="tc-leg-box tc-cnt"></div> 감속 / 카운트다운</div>
+                <div class="tc-leg-item"><div class="tc-leg-box tc-emb"></div> EMB 체결 (★)</div>
+                <div class="tc-leg-item"><div class="tc-leg-box tc-rel"></div> EMB 해제 후 200ms 대기</div>
+                <div class="tc-leg-item"><div class="tc-leg-box tc-ss"></div> 소프트스타트 (0→100%, 200ms)</div>
+                <div class="tc-leg-item"><div class="tc-leg-box tc-norm"></div> 정상 동작</div>
+            </div>
+        </div><!-- /tc-wrap -->
+
+        <!-- brake_delay 파라미터 주의사항 -->
+        <table>
+            <thead><tr><th>항목</th><th>내용</th></tr></thead>
+            <tbody>
+                <tr><td>설정 단위</td><td>ms (SYSTEM_CONF <code>uint16_t brake_delay</code>)</td></tr>
+                <tr><td>내부 변환</td><td><code>brake_delay_timeout_init = brake_delay / 10</code> (10ms 틱, 정수 나눗셈)</td></tr>
+                <tr><td>실효 단위</td><td><b>10ms 배수</b> — 예: 506 → 500ms 동작 (나머지 6ms 버려짐)</td></tr>
+                <tr><td>②→③ 조건</td><td><code>|avr_rpm| &lt; 400 RPM</code> 이 100ms(10틱) 연속 성립</td></tr>
+                <tr><td>EMB 해제 후 대기</td><td><code>EMB_RELEASE_DELAY_MS = 200ms</code> — PWM 완전 차단</td></tr>
+                <tr><td>소프트스타트</td><td><code>EMB_SOFTSTART_RATE = 0.05f</code>/10ms → 0→100%까지 200ms</td></tr>
+                <tr><td>재가동 취소 조건</td><td>RPM 감속 중 스로틀 재입력 시 brake_delay 카운트 즉시 리셋</td></tr>
+            </tbody>
+        </table>
+
+        <h3>7.3 리프트 / 캐스트 밸브 제어</h3>
+        <table>
+            <thead><tr><th>명령</th><th>RY4(M)</th><th>RY5(SV1)</th><th>RY6(SV2)</th><th>WUP(CSV1)</th><th>WDN(CSV2)</th></tr></thead>
+            <tbody>
+                <tr><td>모두 정지</td><td>OFF</td><td>OFF</td><td>OFF</td><td>OFF</td><td>OFF</td></tr>
+                <tr><td>X축 UP</td><td>ON</td><td>ON</td><td>OFF</td><td>OFF</td><td>OFF</td></tr>
+                <tr><td>X축 DN</td><td>OFF</td><td>ON</td><td>ON</td><td>OFF</td><td>OFF</td></tr>
+                <tr><td>W축 UP</td><td>ON</td><td>OFF</td><td>OFF</td><td>ON</td><td>OFF</td></tr>
+                <tr><td>W축 DN</td><td>ON</td><td>OFF</td><td>OFF</td><td>OFF</td><td>ON</td></tr>
+            </tbody>
+        </table>
+        <div class="info">
+            리밋 스위치(<code>local_lift.castLimit</code>): 1=하한, 2=상한, 3=양쪽.<br>
+            상한 리밋에서 UP 명령, 하한 리밋에서 DN 명령은 자동으로 차단됩니다.
+        </div>
+    </section>
+
+    <!-- 8. 보호 기능 -->
+    <section id="safety">
+        <h2>8. 보호 기능</h2>
+
+        <table>
+            <thead><tr><th>보호 종류</th><th>조건</th><th>동작</th><th>복구</th></tr></thead>
+            <tbody>
+                <tr>
+                    <td>FET 과열 보호</td>
+                    <td>FET 온도 &gt; limit_fet_temp(85°C) 10초 연속</td>
+                    <td><code>fet_temp_protect=1</code> → Calcu_targetPWM 내 PWM 강제 0</td>
+                    <td>온도가 임계값 이하로 복귀 시 자동 해제</td>
+                </tr>
+                <tr>
+                    <td>방향 전환 딜레이</td>
+                    <td>전후진 스위치 변경 감지</td>
+                    <td><code>JENHUJIN_SWITCH_CHANGE_FLAG=1</code> → PWM 강제 0</td>
+                    <td>양쪽 PWM &lt; 0.2 확인 후 자동 해제</td>
+                </tr>
+                <tr>
+                    <td>비상 정지</td>
+                    <td>pIO_DP 비상 버튼 입력 (PC2 HIGH)</td>
+                    <td><code>HOLD_Emergency=1</code> → 5회 폴링 확인 후 <code>power_off()</code> 호웉<br>(FET 차단 + MC1·MC2 릴레이 OFF + EMB 체결)</td>
+                    <td>수동 복구 (재부팅)</td>
+                </tr>
+                <tr>
+                    <td>NaN / 이상 RPM 방지</td>
+                    <td>RPM 값 NaN 또는 |rpm| &gt; 100000</td>
+                    <td>current_rpm = 0.0으로 강제 설정</td>
+                    <td>자동</td>
+                </tr>
+                <tr>
+                    <td>BEMF 스파이크 필터</td>
+                    <td>BEMF RPM 측정값이 이전 대비 40% 이상 급감</td>
+                    <td>직전 RPM 값 유지 (노이즈 차단)</td>
+                    <td>자동</td>
+                </tr>
+                <tr>
+                    <td>IWDG 워치독</td>
+                    <td>메인 루프 정지</td>
+                    <td>MCU 리셋</td>
+                    <td>자동 리셋</td>
+                </tr>
+                <tr>
+                    <td>PID Anti-windup</td>
+                    <td>적분값 &gt; ±500 또는 stop_throttle 시</td>
+                    <td>적분값 클램핑 또는 0으로 리셋</td>
+                    <td>자동</td>
+                </tr>
+                <tr>
+                    <td>PWM 데드존</td>
+                    <td>|out_pwm| &lt; 0.05</td>
+                    <td>out_pwm = 0.0 (FET 완전 OFF)</td>
+                    <td>자동</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="warning">
+            <strong>비상 정지 동작 순서</strong><br>
+            비상 버튼(PC2) 입력 확인 → 10ms 폴링으로 5회 연속 확인 (50ms)→ <code>power_off()</code> 호웉<br>
+            <code>power_off()</code> 내부: FET Enable 차단(pSD LOW) → MC1·MC2 릴레이 OFF → EMB 스프링 체결(RY3 저전압) → 500ms 대기 → 전체 릴레이 OFF<br>
+            복구 방법: 비상 버튼을 해제한 후 전원을 재부팅해야 합니다. HOLD_Emergency는 리셋되지 않으므로 소프트웨어만으로 자동 복구되지 않습니다.
+        </div>
+    </section>
+
+    <!-- 9. Flash 설정 저장 -->
+    <section id="flash">
+        <h2>9. Flash 설정 저장</h2>
+
+        <table>
+            <thead><tr><th>항목</th><th>내용</th></tr></thead>
+            <tbody>
+                <tr><td>저장 주소</td><td>0x0801F800 (Flash 마지막 페이지)</td></tr>
+                <tr><td>페이지 크기</td><td>1KB (STM32F103)</td></tr>
+                <tr><td>데이터 구조</td><td>FLASH_MEM_CONFIG: STX(0xAA55) + SYSTEM_CONF + ETX(0x55) + CheckSum</td></tr>
+                <tr><td>무결성 검사</td><td>STX == 0xAA55 AND 바이트합 CheckSum 일치 시 복원</td></tr>
+                <tr><td>불일치 시</td><td>sysConf_init 기본값으로 초기화 후 Flash에 재기록</td></tr>
+                <tr><td>저장 트리거</td><td>sysFlag.SaveEEPROM = 1 → hnd_millisec_routine()에서 100ms 주기로 감지</td></tr>
+                <tr><td>저장 함수</td><td>pFlash_mem-&gt;save_to_flash_config(sysConf)</td></tr>
+            </tbody>
+        </table>
+
+        <div class="warning">
+            <strong>Flash 쓰기 중 전원 차단 주의</strong><br>
+            Flash 소거(Erase) 및 기록 중 전원이 차단되면 설정이 손상될 수 있습니다.
+            손상된 경우 STX 또는 CheckSum 오류로 감지되어 기본값으로 자동 복구됩니다.
+        </div>
+    </section>
+
+    <!-- 10. 디버그 -->
+    <section id="debug">
+        <h2>10. 시리얼 디버그 출력</h2>
+
+        <p>UART3을 통해 printf()로 진단 정보를 출력합니다 (115200 bps 권장).</p>
+
+        <h3>10.1 1초 주기 출력 내용 (onesec_routine)</h3>
+        <div class="code-block">
+<span class="cmt">// 예시 출력:</span>
+fet_temp[42/2180] motor_temp[35/1870] battery_voltage[245|2105]
+[CONF] batt_v=1 lim_I=200 lim_mT=90 lim_fT=85 alrm_B=23 cart=1 pol1=0 pol2=0
+[CONF] tbd=99 offset=300 slip=80 fwd=100 bwd=80 accel=10 decel=20 brk_dly=400 brk_rate=5
+        </div>
+
+        <h3>10.2 주요 이벤트 출력</h3>
+        <table>
+            <thead><tr><th>이벤트</th><th>출력 메시지</th></tr></thead>
+            <tbody>
+                <tr><td>방향 전환 감지</td><td><code>(#1111)CHANGE_EVT |board_io[n] |ctl_pwm.io[n]</code></td></tr>
+                <tr><td>방향 전환 딜레이 중</td><td><code>@@@@@@@CHANGE_FLAG@@@@@@@@@@</code></td></tr>
+                <tr><td>Flash 읽기 성공</td><td><code>@@@MEMORY [OK]~</code></td></tr>
+                <tr><td>Flash 기본값 적용</td><td><code>@@@MEMORY [Fail]~</code></td></tr>
+                <tr><td>설정 저장 완료</td><td><code>###SaveEEPROM===</code></td></tr>
+                <tr><td>FET 과열 차단</td><td><code>### FET TEMP PROTECT! [온도 > 임계값]</code></td></tr>
+                <tr><td>FET 보호 해제</td><td><code>### FET TEMP PROTECT cleared [온도]</code></td></tr>
+                <tr><td>극성/비율 설정 확인</td><td><code>@@@ motor_polrarity(0)(0)</code> 등</td></tr>
+            </tbody>
+        </table>
+
+        <h3>10.3 주석 처리된 상세 디버그 (필요 시 활성화)</h3>
+        <p>아래 printf 줄의 주석을 해제하면 상세 진단이 가능합니다:</p>
+        <div class="code-block">
+<span class="cmt">// onesec_routine() 내 주석 처리된 진단 출력 예시:</span>
+<span class="cmt">// printf("vr[%.2f/%.2f] rpm[%.1f|%.1f] target_rpm[%.1f|%.1f] eRPM[%.1f|%.1f]\r\n", ...);</span>
+<span class="cmt">// printf("HOLD_Emergency[%d] emb_delay[%d] forward[%.1f^%.1f]\r\n", ...);</span>
+
+<span class="cmt">// Calcu_sourcePWM() 내 실시간 제어값 출력:</span>
+<span class="cmt">// cprintf(C_RED, "i_poten[%.1f] limit[%.1f] control_value[%.1f] ...");</span>
+
+<span class="cmt">// Dual_Motor_GetVelocty() 내 BEMF 측정값 출력:</span>
+<span class="cmt">// cprintf(C_RED,"@@@@ vf1_measured: %.2f^%.2f rpm(%.0f|%.0f) ...");</span>
+        </div>
+
+        <div class="info">
+            <strong>cprintf() 컬러 코드</strong><br>
+            C_RED=빨강, C_GREEN=초록, C_YELLOW=노랑, C_BLUE=파랑 등 ANSI 컬러 코드를 지원합니다.
+            터미널 소프트웨어에서 ANSI 컬러를 활성화해야 색상이 표시됩니다.
+        </div>
+
+        <h3>10.4 CAN 송신 데이터 형식 (0x588)</h3>
+        <p>CAN이 연결된 경우 100ms마다 8바이트 데이터를 송신합니다:</p>
+        <table>
+            <thead><tr><th>바이트</th><th>내용</th><th>인코딩</th></tr></thead>
+            <tbody>
+                <tr><td>0~2</td><td>RPM1(12bit) + RPM2(12bit)</td><td>−3600~+3600 → 0~4095 변환</td></tr>
+                <tr><td>3</td><td>전류 (8bit)</td><td>measure_m12_current / 16</td></tr>
+                <tr><td>4~6</td><td>배터리 전압(10bit) + 모터 온도(7bit) + FET 온도(7bit)</td><td>pack7() 함수</td></tr>
+                <tr><td>7</td><td>상태 플래그</td><td>bisang, emb, emb_error, can_ready, limitSwitch, spray</td></tr>
+            </tbody>
+        </table>
+        <div class="info">
+            전송용 RPM은 표시용 보정값 적용: 전진 × 1.667, 후진 × 2.174 (상부 DCU 표시 기준).
+            내부 제어에 사용되는 <code>pPWM-&gt;rpm</code>은 변경하지 않습니다.
+        </div>
+    </section>
+
+    <!-- 11. CAN 설정기 -->
+    <section id="can-setup">
+        <h2>11. CAN 설정기 연결 및 설정 시퀀스</h2>
+
+        <p>YCB 듀얼 모터 드라이버는 CAN 버스를 통해 외부 설정기(PC 툴 등)와 연결하여
+        <code>SYSTEM_CONF</code> 파라미터를 읽고 쓸 수 있습니다.
+        설정기와의 통신은 <strong>요청(Request) → 응답(Response)</strong> 구조로 동작하며,
+        수신 완료 후 체크섬이 일치하면 Flash에 자동 저장합니다.</p>
+
+        <h3>11.1 CAN ID 할당</h3>
+        <table>
+            <thead><tr><th>방향</th><th>CAN ID</th><th>내용</th></tr></thead>
+            <tbody>
+                <tr><td>설정기 → DCU (요청)</td><td>0x700</td><td>설정 데이터 요청 (8바이트 무관)</td></tr>
+                <tr><td>DCU → 설정기 (응답)</td><td>0x5B0 ~ 0x5B5</td><td>SYSTEM_CONF 6패킷 × 8바이트 = 48바이트</td></tr>
+                <tr><td>설정기 → DCU (쓰기)</td><td>0x708 ~ 0x70C</td><td>변경된 SYSTEM_CONF 5패킷 × 8바이트 = 40바이트</td></tr>
+                <tr><td>DCU → 설정기 (상태)</td><td>0x588</td><td>100ms 주기 상태 송신 (RPM/온도/전압)</td></tr>
+            </tbody>
+        </table>
+        <div class="info">
+            RX 필터: <code>0x700 ~ 0x70F</code> 범위만 수신 (FilterMask <code>0x7F0</code>).
+            설정기 패킷(0x708~0x70C)도 이 범위 내에 포함됩니다.
+        </div>
+
+        <h3>11.2 설정 읽기 시퀀스 (설정기 → DCU 요청)</h3>
+        <div class="code-block">
+<span class="cmt">// ① 설정기가 0x700 ID로 CAN 메시지 전송 (데이터 내용 무관)</span>
+설정기 → [CAN 0x700] 8바이트
+
+<span class="cmt">// ② DCU: HAL_CAN_RxFifo0MsgPendingCallback() 에서 수신</span>
+<span class="cmt">//    canFlag.needTxsetupData = 1 세트</span>
+<span class="cmt">//    canFlag.needRxConfigData = 0 클리어 (진행 중인 쓰기 취소)</span>
+<span class="cmt">//    sysFlag.savedConfigOK = 0 클리어</span>
+
+<span class="cmt">// ③ main() 루프에서 needTxsetupData 감지</span>
+pCAN->canFlag.needTxsetupData = 0;
+pCAN->CAN_Request_Setup_Data();   <span class="cmt">// 6패킷 전송</span>
+
+<span class="cmt">// ④ CAN_Request_Setup_Data() 내부:</span>
+<span class="cmt">//    memcpy(canTX_Data, &sysConf, 48바이트)</span>
+<span class="cmt">//    put_canTxd(0x5B0, buf[0])  → 10ms 딜레이</span>
+<span class="cmt">//    put_canTxd(0x5B1, buf[1])  → 10ms 딜레이</span>
+<span class="cmt">//    ...반복 (총 0x5B0 ~ 0x5B5)</span>
+
+DCU → [CAN 0x5B0] 8바이트 (SYSTEM_CONF [0..7])
+DCU → [CAN 0x5B1] 8바이트 (SYSTEM_CONF [8..15])
+DCU → [CAN 0x5B2] 8바이트 (SYSTEM_CONF [16..23])
+DCU → [CAN 0x5B3] 8바이트 (SYSTEM_CONF [24..31])
+DCU → [CAN 0x5B4] 8바이트 (SYSTEM_CONF [32..39])
+DCU → [CAN 0x5B5] 8바이트 (SYSTEM_CONF [40..47])
+        </div>
+
+        <h3>11.3 설정 쓰기 시퀀스 (설정기 → DCU 저장)</h3>
+        <div class="code-block">
+<span class="cmt">// ① 설정기가 변경된 SYSTEM_CONF를 5패킷으로 분할 전송</span>
+설정기 → [CAN 0x708] 8바이트  (idx, battery_voltage, limit_current, limit_motor_temp)
+설정기 → [CAN 0x709] 8바이트  (limit_fet_temp, alarm_Battery, cart_type, motor1_polarity)
+설정기 → [CAN 0x70A] 8바이트  (motor2_polarity, tbd, reserved, tottle_offset)
+설정기 → [CAN 0x70B] 8바이트  (stop_slip, foreward, backward, accel)
+설정기 → [CAN 0x70C] 8바이트  (decel, brake_delay, brake_rate, checkSum)  <span class="cmt">← 마지막 패킷</span>
+
+<span class="cmt">// ② DCU: CAN_Request_SAVE() 에서 각 패킷을 canRcvBuff[memIdx] 에 저장</span>
+<span class="cmt">//    memIdx = id - 0x708  (0x708→0, 0x709→1, ... 0x70C→4)</span>
+
+<span class="cmt">// ③ 0x70C 수신 시: 체크섬 검증</span>
+<span class="cmt">//    canRcvBuff[0..4] → buf[40바이트] 전체 합산 → sum &amp; 0xFF</span>
+if (sum == config.checkSum) {          <span class="cmt">// 일치 → 저장 진행</span>
+    sysFlag.SaveEEPROM = 1;            <span class="cmt">// Flash 저장 요청</span>
+    sysFlag.savedConfigOK = 1;
+    canFlag.needRxConfigData = 1;      <span class="cmt">// canSetConfig() 호출 요청</span>
+} else {                               <span class="cmt">// 불일치 → 재전송 필요</span>
+    printf("##########[Error] Need Retry GetData");
+}
+
+<span class="cmt">// ④ main() 루프에서 needRxConfigData 감지</span>
+pCAN->canFlag.needRxConfigData = 0;
+pCAN->canSetConfig();                  <span class="cmt">// canRcvBuff → sysConf 복사</span>
+
+<span class="cmt">// ⑤ hnd_millisec_routine(): SaveEEPROM 플래그 감지 → Flash 저장</span>
+pFlash_mem->save_to_flash_config(sysConf);
+printf("###SaveEEPROM===");
+        </div>
+        <div class="warning">
+            <strong>체크섬 오류 시 동작</strong><br>
+            0x70C 수신 후 체크섬이 일치하지 않으면 <code>SaveEEPROM</code>, <code>savedConfigOK</code>가 세트되지 않으며
+            Flash 저장은 이루어지지 않습니다. 설정기는 0x700을 다시 보내 전체 시퀀스를 재시작해야 합니다.
+        </div>
+
+        <h3>11.4 SYSTEM_CONF 패킷 구조 (40바이트)</h3>
+        <table>
+            <thead><tr><th>CAN ID</th><th>바이트 오프셋</th><th>필드 (uint16_t × 4)</th></tr></thead>
+            <tbody>
+                <tr><td>0x708 / 0x5B0</td><td>0 ~ 7</td><td>idx, battery_voltage, limit_current, limit_motor_temp</td></tr>
+                <tr><td>0x709 / 0x5B1</td><td>8 ~ 15</td><td>limit_fet_temp, alarm_Battery, cart_type, motor1_polarity</td></tr>
+                <tr><td>0x70A / 0x5B2</td><td>16 ~ 23</td><td>motor2_polarity, tbd, reserved, tottle_offset</td></tr>
+                <tr><td>0x70B / 0x5B3</td><td>24 ~ 31</td><td>stop_slip, foreward, backward, accel</td></tr>
+                <tr><td>0x70C / 0x5B4</td><td>32 ~ 39</td><td>decel, brake_delay, brake_rate, checkSum</td></tr>
+                <tr><td>(패딩) / 0x5B5</td><td>40 ~ 47</td><td>송신 시 패딩, 수신 시 미사용</td></tr>
+            </tbody>
+        </table>
+        <div class="info">
+            <code>checkSum</code> 계산: <code>buf[0..38]</code> 합산 후 <code>&amp; 0xFF</code>.
+            필드 순서는 <code>SYSTEM_CONF</code> 구조체 선언 순서와 동일합니다 (<a href="#config">6절 파라미터 표</a> 참조).
+        </div>
+
+        <h3>11.5 전체 시퀀스 흐름도</h3>
+
+        <style>
+        .sd-wrap{background:#12151f;border-radius:12px;padding:24px 20px 30px;margin:16px 0;font-family:'Malgun Gothic','Segoe UI',sans-serif;font-size:0.83em;overflow-x:auto;}
+        .sd-layout{display:grid;grid-template-columns:180px 1fr 260px;min-width:680px;}
+        .sd-head{border-radius:8px;text-align:center;padding:10px 12px;font-weight:700;font-size:0.97em;letter-spacing:.3px;}
+        .sd-head.left{background:#253060;border:2px solid #5c6bc0;color:#c5cae9;}
+        .sd-head.right{background:#1a3a25;border:2px solid #2e7d32;color:#a5d6a7;}
+        .sd-lane{display:flex;justify-content:center;}
+        .sd-vline{width:3px;border-radius:2px;}
+        .sd-vline.left{background:repeating-linear-gradient(to bottom,#5c6bc0 0,#5c6bc0 7px,transparent 7px,transparent 14px);}
+        .sd-vline.right{background:repeating-linear-gradient(to bottom,#2e7d32 0,#2e7d32 7px,transparent 7px,transparent 14px);}
+        .sd-msg-block{display:flex;flex-direction:column;align-items:stretch;padding:6px 0;}
+        .sd-msg-label{text-align:center;font-size:.82em;color:#9fa8da;margin-bottom:3px;}
+        .sd-arrow-row{display:flex;align-items:center;}
+        .sd-arr-line{flex:1;height:2px;}
+        .sd-arr-line.blue{background:#5c6bc0;}
+        .sd-arr-line.green{background:#2e7d32;}
+        .sd-head-r{width:0;height:0;border-top:7px solid transparent;border-bottom:7px solid transparent;border-left:11px solid #5c6bc0;flex-shrink:0;}
+        .sd-head-l{width:0;height:0;border-top:7px solid transparent;border-bottom:7px solid transparent;border-right:11px solid #2e7d32;flex-shrink:0;}
+        .sd-can-chip{align-self:center;margin-top:4px;background:#1e2a50;border:1px solid #5c6bc0;border-radius:5px;padding:3px 12px;color:#c5cae9;font-size:.9em;text-align:center;white-space:nowrap;}
+        .sd-can-chip.green{background:#1a3028;border-color:#2e7d32;color:#c8e6c9;}
+        .sd-sub-note{text-align:center;font-size:.78em;color:#546e7a;margin-top:2px;}
+        .sd-proc-col{display:flex;flex-direction:column;gap:3px;padding:4px 0 4px 8px;}
+        .sd-proc-box{border-radius:6px;padding:5px 11px;font-size:.82em;line-height:1.5;border-left:3px solid;}
+        .sd-proc-box.teal{background:#1b2e2e;border-color:#00897b;color:#b2dfdb;}
+        .sd-proc-box.ok{background:#1a3028;border-color:#43a047;color:#a5d6a7;}
+        .sd-proc-box.err{background:#2d1a1a;border-color:#e53935;color:#ef9a9a;}
+        .sd-proc-box code{color:#80cbc4;background:transparent;font-size:.95em;}
+        .sd-proc-box.err code{color:#ef9a9a;}
+        .sd-badge{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#3949ab;color:#fff;font-size:.78em;font-weight:700;flex-shrink:0;}
+        .sd-step-title{display:flex;align-items:center;gap:6px;font-size:.82em;color:#7986cb;font-weight:600;margin-bottom:4px;}
+        .sd-divider{grid-column:1/-1;border:none;border-top:1px dashed #1e2740;margin:4px 0;}
+        </style>
+
+        <div class="sd-wrap">
+        <div class="sd-layout">
+
+            <!-- 헤더 -->
+            <div style="padding:0 8px 10px 0;"><div class="sd-head left">설정기 (PC 툴)</div></div>
+            <div></div>
+            <div style="padding:0 0 10px 8px;"><div class="sd-head right">DCU (STM32)</div></div>
+
+            <!--  설정 요청 -->
+            <div class="sd-lane"><div class="sd-vline left" style="height:105px"></div></div>
+            <div class="sd-msg-block">
+                <div class="sd-step-title"><span class="sd-badge"></span> 설정 요청</div>
+                <div class="sd-arrow-row"><div class="sd-arr-line blue"></div><div class="sd-head-r"></div></div>
+                <div class="sd-can-chip">CAN &nbsp;<strong>0x700</strong>&nbsp; — 설정 데이터 요청 (8B, 내용 무관)</div>
+            </div>
+            <div class="sd-lane"><div class="sd-vline right" style="height:105px"></div></div>
+
+            <!-- DCU  처리 -->
+            <div class="sd-lane"><div class="sd-vline left" style="height:70px"></div></div>
+            <div></div>
+            <div class="sd-proc-col">
+                <div class="sd-proc-box teal"><code>canFlag.needTxsetupData = 1</code></div>
+                <div class="sd-proc-box teal">main loop 감지  <code>CAN_Request_Setup_Data()</code> 호출</div>
+            </div>
+
+            <hr class="sd-divider">
+
+            <!--  현재 설정 응답 -->
+            <div class="sd-lane"><div class="sd-vline left" style="height:115px"></div></div>
+            <div class="sd-msg-block">
+                <div class="sd-step-title"><span class="sd-badge"></span> 현재 설정값 응답</div>
+                <div class="sd-arrow-row"><div class="sd-head-l"></div><div class="sd-arr-line green"></div></div>
+                <div class="sd-can-chip green">CAN &nbsp;<strong>0x5B0 ~ 0x5B5</strong>&nbsp; — SYSTEM_CONF (6패킷  8B = 48B)</div>
+                <div class="sd-sub-note"> 패킷 간 10 ms 딜레이 적용 (HAL_Delay 사용 가능 구간)</div>
+            </div>
+            <div class="sd-lane"><div class="sd-vline right" style="height:115px"></div></div>
+
+            <hr class="sd-divider">
+
+            <!--  쓰기 패킷 -->
+            <div class="sd-lane"><div class="sd-vline left" style="height:165px"></div></div>
+            <div class="sd-msg-block">
+                <div class="sd-step-title"><span class="sd-badge"></span> 파라미터 수정 후 쓰기</div>
+                <div class="sd-arrow-row"><div class="sd-arr-line blue"></div><div class="sd-head-r"></div></div>
+                <div class="sd-can-chip">CAN &nbsp;<strong>0x708 ~ 0x70B</strong>&nbsp; — 설정 패킷 (4개)</div>
+                <div style="height:8px"></div>
+                <div class="sd-arrow-row"><div class="sd-arr-line blue"></div><div class="sd-head-r"></div></div>
+                <div class="sd-can-chip">CAN &nbsp;<strong>0x70C</strong>&nbsp; — 마지막 패킷 + checkSum </div>
+                <div class="sd-sub-note"> 0x70C 수신 시 체크섬 검증 트리거</div>
+            </div>
+            <div class="sd-lane"><div class="sd-vline right" style="height:165px"></div></div>
+
+            <!-- DCU  처리 -->
+            <div class="sd-lane"><div class="sd-vline left" style="height:115px"></div></div>
+            <div></div>
+            <div class="sd-proc-col">
+                <div class="sd-proc-box teal"><code>canRcvBuff[0..4]</code> 누적 저장</div>
+                <div class="sd-proc-box teal">체크섬 검증:&nbsp;<code>Σ buf[0..38] &amp; 0xFF == checkSum ?</code></div>
+                <div class="sd-proc-box ok">✔ 일치  <code>SaveEEPROM=1</code> &nbsp;&nbsp; <code>needRxConfigData=1</code></div>
+                <div class="sd-proc-box err">✘ 불일치  Flash 저장 없음, 설정기 0x700 재전송 필요</div>
+            </div>
+
+            <hr class="sd-divider">
+
+            <!--  설정 적용 -->
+            <div class="sd-lane"><div class="sd-vline left" style="height:60px"></div></div>
+            <div></div>
+            <div class="sd-proc-col">
+                <div class="sd-step-title"><span class="sd-badge"></span> 설정 적용</div>
+                <div class="sd-proc-box ok"><code>canSetConfig()</code> — <code>canRcvBuff  sysConf</code> 구조체 복사</div>
+            </div>
+
+            <!--  Flash 저장 -->
+            <div class="sd-lane"><div class="sd-vline left" style="height:75px"></div></div>
+            <div></div>
+            <div class="sd-proc-col">
+                <div class="sd-step-title"><span class="sd-badge"></span> Flash 영구 저장</div>
+                <div class="sd-proc-box teal"><code>hnd_millisec_routine()</code> — <code>SaveEEPROM</code> 플래그 감지</div>
+                <div class="sd-proc-box ok"><code>save_to_flash_config(sysConf)</code>  0x0801F800 저장 완료 ✔</div>
+            </div>
+
+        </div><!-- /sd-layout -->
+        </div><!-- /sd-wrap -->
+    </section>
+    </section>
+
+</div><!-- /content -->
+
+<footer>
+    YCB 듀얼 모터 드라이버 사용설명서 — black_driver_103rbtx_no_can<br>
+    STM32F103RBTx | 펌웨어 기준일: 2026-06-02 | Author: thpark
+</footer>
+
+</div><!-- /container -->
+</body>
+</html>

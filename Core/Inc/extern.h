@@ -17,6 +17,7 @@
 #include "../../class/tja1050/tja1050.h"
 #include "../../class/data_class/dataclass.h"
 #include "../../class/pwm16/pwm16.h"
+#include "../../class/fnd595/fnd595.h"
 #include "../../class/stm32f_flash/stm32flash.h"
 //#include "../../class/zigbee/zigbee.h"
 //#include "../../class/wifi_data/wifiParse.h"
@@ -157,15 +158,16 @@ void cprintf(ccolor_t color, const char *fmt, ...);
 extern tja1050 *pCAN;
 extern data_class *pDataClass;
 extern PWM16 *pPWM;
+extern FND595 *pFND595;
 extern stm32flash *pFlash_mem;
 //extern zigbee *pZIGBEE;
 //extern wifiParse *pWIFI;
 extern eps *pEPS;
 
+extern SYSTEM_CONF sysConf;
 extern uint8_t SYSTEM_setup_data_ok;
 extern uint16_t rpm;
 extern PID_CONFIG pidCONF;
-extern uint8_t can_process_flag;
 //extern uint8_t rxBuffer[RX_BUFFER_SIZE];
 
 //--------------------------------------------------

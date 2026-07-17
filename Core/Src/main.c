@@ -48,8 +48,6 @@ uint8_t one_millisec_flag=0;
 uint8_t ten_millisec_flag=0;
 uint8_t hnd_millisec_flag=0;
 
-uint8_t can_process_flag=0;
-
 uint8_t one_sec_flag=0;
 int8_t boot_time_out=20;
 uint8_t rx_data;
@@ -59,6 +57,7 @@ uint8_t rx_flag=0;
 uint16_t rpm=0;
 //uint16_t rpm_duration_cnt=0;
 uint8_t SYSTEM_setup_data_ok=0;
+SYSTEM_CONF sysConf;
 PID_CONFIG pidCONF;
 
 //// DMA �????? 버퍼
@@ -75,7 +74,9 @@ extern "C" int _write(int32_t file, uint8_t *ptr, int32_t len)
 #else
 int _write(int32_t file, uint8_t *ptr, int32_t len) {
 #endif
-	if (HAL_UART_Transmit(&huart3, ptr, len, len) == HAL_OK)	return len;
+	HAL_StatusTypeDef tx1 = HAL_UART_Transmit(&huart1, ptr, len, len);
+	HAL_StatusTypeDef tx3 = HAL_UART_Transmit(&huart3, ptr, len, len);
+	if(tx1 == HAL_OK || tx3 == HAL_OK) return len;
 	else return 0;
 }
 
@@ -173,94 +174,15 @@ int main(void)
   pCAN = new tja1050();
   pDataClass=new data_class();
   pPWM=new PWM16();
+  pFND595=new FND595();
   pFlash_mem=new stm32flash();
 //  pZIGBEE =new zigbee();
 //  pWIFI =new wifiParse();
   pEPS =new eps();
 
-  pFlash_mem->Get_BackUP();
+  /* SYSTEM_CONF is not used in this system. */
   pCAN->init();
   
-#if 0
-  // ADC 초기화 및 활성화
-  printf("ADC Calibration...\r\n");
-  
-  // ADC 핀들을 강제로 ANALOG 모드로 설정
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-  __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOC_CLK_ENABLE();
-  
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3
-                        |GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7;
-  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-  
-  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5;
-  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-  
-  printf("ADC pins configured as ANALOG\r\n");
-  
-  // 클럭 상태 진단
-  printf("=== Clock Diagnostic ===\r\n");
-  printf("SYSCLK: %lu Hz\r\n", HAL_RCC_GetSysClockFreq());
-  printf("HCLK: %lu Hz\r\n", HAL_RCC_GetHCLKFreq());
-  printf("PCLK1: %lu Hz\r\n", HAL_RCC_GetPCLK1Freq());
-  printf("PCLK2: %lu Hz\r\n", HAL_RCC_GetPCLK2Freq());
-  
-  // ADC 클럭 설정 확인
-  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
-  HAL_RCCEx_GetPeriphCLKConfig(&PeriphClkInit);
-  printf("ADC Clock Prescaler: ");
-  switch(PeriphClkInit.AdcClockSelection) {
-      case RCC_ADCPCLK2_DIV2: printf("PCLK2/2\r\n"); break;
-      case RCC_ADCPCLK2_DIV4: printf("PCLK2/4\r\n"); break;
-      case RCC_ADCPCLK2_DIV6: printf("PCLK2/6\r\n"); break;
-      case RCC_ADCPCLK2_DIV8: printf("PCLK2/8\r\n"); break;
-      default: printf("Unknown\r\n");
-  }
-  printf("========================\r\n");
-  
-  if(HAL_ADCEx_Calibration_Start(&hadc1) != HAL_OK) {
-      printf("ADC Calibration FAILED!\r\n");
-  } else {
-      printf("ADC Calibration OK\r\n");
-  }
-  
-  // ADC 클럭 재확인
-  if(__HAL_RCC_ADC1_IS_CLK_ENABLED()) {
-      printf("ADC Clock: ENABLED\r\n");
-  } else {
-      printf("ADC Clock: DISABLED - Enabling...\r\n");
-      __HAL_RCC_ADC1_CLK_ENABLE();
-  }
-  
-  // 간단한 ADC 테스트
-  ADC_ChannelConfTypeDef testConfig = {0};
-  testConfig.Channel = ADC_CHANNEL_VREFINT;
-  testConfig.Rank = ADC_REGULAR_RANK_1;
-  testConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
-  
-  hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ScanConvMode = DISABLE;
-  hadc1.Init.NbrOfConversion = 1;
-  HAL_ADC_Init(&hadc1);
-  HAL_ADC_ConfigChannel(&hadc1, &testConfig);
-  
-  HAL_ADC_Start(&hadc1);
-  if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK) {
-      uint16_t vref_test = HAL_ADC_GetValue(&hadc1);
-      printf("ADC Test (VREF): %d (OK if 1200~1500)\r\n", vref_test);
-  } else {
-      printf("ADC Test FAILED - TIMEOUT!\r\n");
-  }
-  HAL_ADC_Stop(&hadc1);
-  
-  // 원래 설정으로 복구
-  MX_ADC1_Init();
-#endif
   //__HAL_UART_ENABLE_IT(&huart2,UART_IT_RXNE);
   //HAL_UART_Receive_IT(&huart2, rxBuffer, RX_BUFFER_SIZE);
   //Start_UART_DMA_Receive();
@@ -296,11 +218,15 @@ int main(void)
   printf("(4) pDataClass->power_on..\r\n");
   pDataClass->power_on();
   pDataClass->HOLD_Emergency=0;
+  //pFND595->PrintDigit(5);
+  //pFND595->TestSegments();
+  pFND595->PrintDigit(0);
+  //pFND595->TestOutputBits();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-
+  //__HAL_IWDG_START(&hiwdg);//40KHZ LCLK 128분주-3125 10(312.5*10)//4000
   while (1)
   {
 	 // printf(".####");
@@ -327,11 +253,6 @@ int main(void)
 		  pCAN->canSetConfig();
 	  }
 
-
-    if(can_process_flag){
-      can_process_flag=0;
-       pDataClass->can_process_routine();
-    }
 
 //=========================================
 	  if(ten_millisec_flag){
@@ -601,8 +522,7 @@ void Error_Handler(void)
   }
   /* USER CODE END Error_Handler_Debug */
 }
-
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
   *         where the assert_param error has occurred.

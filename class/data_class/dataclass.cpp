@@ -20,6 +20,8 @@ data_class::data_class()
 	memset(&board_io,0,sizeof(MY_IO));
 	memset(&ex_board_io,0,sizeof(MY_IO));
 	memset(&inputRaw,0,sizeof(POSITION_ANGLE));
+	memset(&batt,0,sizeof(MY_BATTERY));
+	memset(&error_code,0,sizeof(ERROR_CODE_STATE));
 
 	gMAIN.flg_state.trot_zero=1;
 	relayAllOFF();
@@ -32,7 +34,18 @@ data_class::~data_class()
 
 void data_class::power_on(){
 	PWR_ON_Flg=1;
-	float battery_table[6]={12.0f, 24.0f, 36.0f,48.0f, 60.0f, 72.0f};
+	over_current_10ms_cnt = 0;
+	over_current_retry_wait_10ms_cnt = 0;
+	over_current_retry_count = 0;
+	over_current_protect = 0;
+	fet_temp_over_cnt = 0;
+	fet_temp_protect = 0;
+	currentPWM1 = 0.0f;
+	currentPWM2 = 0.0f;
+	fm2000_dir1 = 0;
+	fm2000_dir2 = 0;
+	fm2000_dir_change_wait1 = 0;
+	fm2000_dir_change_wait2 = 0;
 	memset(&inputRaw,0,sizeof(POSITION_ANGLE));
 	gMAIN.relay.MC2=1;
 	HAL_GPIO_WritePin(pRY2_GPIO_Port, pRY2_Pin, GPIO_PIN_SET);
@@ -41,27 +54,25 @@ void data_class::power_on(){
 	HAL_GPIO_WritePin(pRY1_GPIO_Port, pRY1_Pin, GPIO_PIN_SET);
 	HAL_Delay(500);
 	HAL_GPIO_WritePin(pSD_GPIO_Port, pSD_Pin, GPIO_PIN_SET);
-	pPWM->brake_on_flag=1;
+	pPWM->brake_on_flag=0;
 
-	motor1_polarity=pDataClass->motor1_polarity;
-	motor2_polarity=pDataClass->motor2_polarity;
+	//motor1_polarity=sysConf.motor1_polarity;
+	//motor2_polarity=sysConf.motor2_polarity;
 
-	accel_rate=setup_data.conf2.accel/100.0f;
-	decel_rate=setup_data.conf2.decel/100.0f;
-	gamsok_idx=setup_data.conf2.brake_rate;
-	brake_delay=setup_data.conf2.brake_delay;//
-	set_foreward=1.0f;//setup_data.conf2.foreward/100.0f;
-	set_backward=1.0f;//setup_data.conf2.backward/100.0f;
-	batt.use_battery_voltage=battery_table[setup_data.conf1.battery_voltage];
-	batt.motor_spec_voltage =battery_table[setup_data.conf1.battery_voltage];
+	//gamsok_idx=sysConf.brake_rate;
+	brake_delay=DEFAULT_BRAKE_DELAY;
+	//set_foreward=sysConf.foreward/100.0f;
+	//set_backward=set_foreward;
+	batt.use_battery_voltage=DEFAULT_BATTERY_VOLTAGE;
+	batt.motor_spec_voltage=DEFAULT_BATTERY_VOLTAGE;
 	//batt.motor_spec_rpm=MOTOR_MAX_RPM;
 	pidCONF.rpm_to_pwm_scale=1.0f/MOTOR_MAX_RPM;
-	pidCONF.Kp=(float)setup_data.conf2.stop_slip/100.0f;
+	pidCONF.Kp=DEFAULT_PID_KP;
 
 
 	//pPWM->pid_k
-    //setup_data.conf1.motor1_polarity = 1;  // 0 → 1로 변경
-    //setup_data.conf1.motor2_polarity = 1;  // 0 → 1로 변경
+    //sysConf.motor1_polarity = 1;  // 0 → 1로 변경
+    //sysConf.motor2_polarity = 1;  // 0 → 1로 변경
 }
 
 void data_class::power_off(){
@@ -71,7 +82,7 @@ void data_class::power_off(){
 	HAL_GPIO_WritePin(pRY1_GPIO_Port, pRY1_Pin, GPIO_PIN_RESET);//Main Relay Off
 	gMAIN.relay.MC2=0;
 	HAL_GPIO_WritePin(pRY2_GPIO_Port, pRY2_Pin, GPIO_PIN_RESET);//Aux Relay Off
-	pPWM->brake_on_flag=1;
+	pPWM->brake_on_flag=0;
 	HAL_GPIO_WritePin(pRY3_GPIO_Port, pRY3_Pin, GPIO_PIN_RESET);//EMB No Power
 	HAL_Delay(500);
 	relayAllOFF();
@@ -181,9 +192,8 @@ float data_class::LogRampStep(float target, float current)
 {
     float error = target - current;
     if (fabsf(error) < 0.01f)   return 0.0f;
-    // 오차에 따른 상수 선택
-//    float k = (error > 0) ? accel_rate : decel_rate;
-    float k = (error > 0) ? accel_rate : decel_rate;
+    // 감속 판단: 목표 절대값이 현재 절대값보다 작으면 감속 (부호 무관)
+    float k = (fabsf(target) < fabsf(current)) ? DECEL_RATE : ACCEL_RATE;
     // 스텝 계산: 오차가 클 때는 큰 스텝, 작을 때는 작은 스텝
     float step = k * logf(fabsf(error) + 1.0f);
     // 오차 부호에 맞게 스텝 부호 적용
@@ -205,6 +215,20 @@ float data_class::PWM_UpdateRoutine(float targetPWM, float currentPWM, uint8_t t
     else
         currentPWM += step;
     return currentPWM;
+}
+
+float data_class::get_fet_temp_pwm_scale()
+{
+	int8_t fet_temp = (int8_t)batt.fet_temp;
+
+	if(fet_temp_protect || fet_temp >= FET_TEMP_PWM_OFF) return 0.0f;
+	if(fet_temp <= FET_TEMP_DERATE_START) return 1.0f;
+
+	float scale = (float)(FET_TEMP_PWM_OFF - fet_temp) /
+	              (float)(FET_TEMP_PWM_OFF - FET_TEMP_DERATE_START);
+	if(scale < 0.0f) scale = 0.0f;
+	if(scale > 1.0f) scale = 1.0f;
+	return scale;
 }
 
 
@@ -229,6 +253,67 @@ float data_class::scale_value(int value, int min_val, int max_val)
     return (float)(value - min_val) / (float)(max_val - min_val);
 }
 
+float data_class::adc_to_pwm(uint16_t value)
+{
+	float pwm = (float)value / 4095.0f;
+	if(pwm < 0.0f) pwm = 0.0f;
+	if(pwm > 0.90f) pwm = 1.0f;
+	return pwm;
+}
+
+float data_class::Calcu_fm2000_motor_pwm(uint16_t adc_value, uint8_t fnr, uint8_t &confirmed_dir, float &current_pwm, uint8_t &dir_change_wait_cnt)
+{
+	uint8_t request_dir = 0;
+	float target_pwm = 0.0f;
+	const float stop_threshold = 0.01f;
+	const uint8_t direction_change_wait_10ms = 50;
+
+	if(fnr == 1) {
+		request_dir = 1;
+		target_pwm = adc_to_pwm(adc_value);
+	}
+	else if(fnr == 2) {
+		request_dir = 2;
+		target_pwm = -adc_to_pwm(adc_value);
+	}
+
+	if(fet_temp_protect || fabsf(target_pwm) < stop_threshold) {
+		request_dir = 0;
+		target_pwm = 0.0f;
+	}
+
+	uint8_t current_dir = 0;
+	if(current_pwm > stop_threshold) current_dir = 1;
+	else if(current_pwm < -stop_threshold) current_dir = 2;
+
+	if(request_dir != 0 && confirmed_dir != 0 && request_dir != confirmed_dir) {
+		target_pwm = 0.0f;
+		if(current_dir == 0) {
+			if(dir_change_wait_cnt < direction_change_wait_10ms) dir_change_wait_cnt++;
+			if(dir_change_wait_cnt >= direction_change_wait_10ms) {
+				confirmed_dir = request_dir;
+				target_pwm = (request_dir == 1) ? adc_to_pwm(adc_value) : -adc_to_pwm(adc_value);
+				dir_change_wait_cnt = 0;
+			}
+		}
+		else {
+			dir_change_wait_cnt = 0;
+		}
+	}
+	else if(request_dir != 0 && confirmed_dir == 0 && current_dir == 0) {
+		confirmed_dir = request_dir;
+		dir_change_wait_cnt = 0;
+	}
+
+	if(request_dir == 0 && current_dir == 0) {
+		confirmed_dir = 0;
+		dir_change_wait_cnt = 0;
+	}
+
+	current_pwm = PWM_UpdateRoutine(target_pwm, current_pwm, sysFlag.stop_throttle);
+	return current_pwm;
+}
+
 float data_class::Calcu_limit(float throttle, float limit){
 	float control_value = 0.0f;
 	if (throttle >= 0.2f) {
@@ -243,155 +328,192 @@ float data_class::Calcu_limit(float throttle, float limit){
 	return control_value;
 }
 
-DoubleF_VALUE data_class::Calcu_sourcePWM(float i_poten, float limit, uint8_t jenhujin, uint8_t stop_lr){
-	DoubleF_VALUE o_poten;
-	float control_value=Calcu_limit(i_poten, limit);
-	o_poten.f1=o_poten.f2=control_value;
-//	stabilize_change();
-	if(jenhujin){
-		switch(stop_lr){
-			case 3: break;
-			case 0:	o_poten.f1 =o_poten.f2 =0;break;//ALL press
-			case 1:	o_poten.f1 *=gamsok_ratio[gamsok_idx];break;
-			case 2:	o_poten.f2 *=gamsok_ratio[gamsok_idx];break;
-			default:break;
-		}
-	}
-	else//board_io.toggle.jenhujin==0 중립일때는 SPIN
-	{
-		switch(stop_lr)
-		{
-			case 3:	case 0:	o_poten.f1 =o_poten.f2 =0;break;//ALL press
-			case 1:	o_poten.f1 *=(-1.0f);o_poten.f2 *=(1.0f);break;//spin left?
-			case 2:	o_poten.f1 *=(1.0f); o_poten.f2 *=(-1.0f);break;//spin right
-			default:break;
-		}
-	}
-	//cprintf(C_RED, "i_poten[%.1f] limit[%.1f] control_value[%.1f] o_poten[%.1f|%.1f] jenhujin[%d] stop_lr[%d] gamsok_ratio[%.1f]\r\n",i_poten, limit, control_value, o_poten.f1, o_poten.f2,jenhujin, stop_lr, gamsok_ratio[gamsok_idx]);
-	return o_poten;
-}
+//DoubleF_VALUE data_class::Calcu_sourcePWM(float i_poten, float limit, uint8_t jenhujin, uint8_t stop_lr){
+//	DoubleF_VALUE o_poten;
+//	float control_value=Calcu_limit(i_poten, limit);
+//	o_poten.f1=o_poten.f2=control_value;
+////	stabilize_change();
+//	if(jenhujin){
+//		switch(stop_lr){
+//			case 3: break;
+//			case 0:	o_poten.f1 =o_poten.f2 =0;break;//ALL press
+//			case 1:	o_poten.f1 *=gamsok_ratio[gamsok_idx];break;
+//			case 2:	o_poten.f2 *=gamsok_ratio[gamsok_idx];break;
+//			default:break;
+//		}
+//	}
+//	else//board_io.toggle.jenhujin==0 중립일때는 SPIN
+//	{
+//		switch(stop_lr)
+//		{
+//			case 3:	case 0:	o_poten.f1 =o_poten.f2 =0;break;//ALL press
+//			case 1:	o_poten.f1 *=(-1.0f);o_poten.f2 *=(1.0f);break;//spin left?
+//			case 2:	o_poten.f1 *=(1.0f); o_poten.f2 *=(-1.0f);break;//spin right
+//			default:break;
+//		}
+//	}
+//	//cprintf(C_RED, "i_poten[%.1f] limit[%.1f] control_value[%.1f] o_poten[%.1f|%.1f] jenhujin[%d] stop_lr[%d] gamsok_ratio[%.1f]\r\n",i_poten, limit, control_value, o_poten.f1, o_poten.f2,jenhujin, stop_lr, gamsok_ratio[gamsok_idx]);
+//	return o_poten;
+//}
 
+
+//DoubleF_VALUE data_class::Calcu_targetPWM(float throttle, float limit,
+//		uint8_t jenhujin_key, uint8_t jenhujin_confirmed,
+//		uint8_t stop_lr, uint8_t m1_pol, uint8_t m2_pol,
+//		float fwd_ratio, float bwd_ratio)
+//{
+//	// 1. source_pwm 계산 (스로틀, 좌우정지SW, 전후진KEY)
+//	DoubleF_VALUE src = Calcu_sourcePWM(throttle, limit, jenhujin_key, stop_lr);
+//
+//	// 2. 전후진 비율 적용 (모터 극성 반영)
+//	if(jenhujin_key == 1 || jenhujin_key == 2) {
+//		uint8_t intent_fwd = (jenhujin_key == 1) ? 1 : 0;
+//		uint8_t m1_fwd = intent_fwd ^ (m1_pol ? 1 : 0);
+//		uint8_t m2_fwd = intent_fwd ^ (m2_pol ? 1 : 0);
+//		src.f1 *= m1_fwd ? fwd_ratio : bwd_ratio;
+//		src.f2 *= m2_fwd ? fwd_ratio : bwd_ratio;
+//	}
+//
+//	// 3. FET 보호 / 방향전환 딜레이 시 PWM 강제 0
+//	if(fet_temp_protect || JENHUJIN_SWITCH_CHANGE_FLAG) {
+//		src.f1 = 0.0f;
+//		src.f2 = 0.0f;
+//	}
+//	// CheckBrakeState용: 오버라이드 이후 저장 (방향전환 중에는 0으로 전달해야 stop 감지 가능)
+//	inputRaw.source_pwm = src;
+//
+//	// 4. LogRamp 처리
+//	currentPWM1 = PWM_UpdateRoutine(src.f1, currentPWM1, sysFlag.stop_throttle);
+//	currentPWM2 = PWM_UpdateRoutine(src.f2, currentPWM2, sysFlag.stop_throttle);
+//
+//	// 5. 확정된 방향으로 부호 적용 (후진=음수)
+//	DoubleF_VALUE result;
+//	result.f1 = currentPWM1;
+//	result.f2 = currentPWM2;
+//	if(jenhujin_confirmed == 2) {
+//		result.f1 *= -1.0f;
+//		result.f2 *= -1.0f;
+//	}
+//	return result;
+//}
 
 void data_class::ON_Board_INPUT()
 {
-	DoubleF_VALUE imsi;
+	//Get_AdcData();
 	read_in_port();
-	float limit=ladcValue[1]/4096.0f;
-	float adj_vr=scale_value(ladcValue[0], 1013, 3179);//측정한값
-	//ctl_pwm.source_pwm=Calcu_sourcePWM(adj_vr, limit);
-	inputRaw.source_pwm=Calcu_sourcePWM(adj_vr, limit, board_io.toggle.jenhujin, board_io.toggle.t_sw);
 	inputRaw.rpm.f1=pPWM->rpm.f1;
 	inputRaw.rpm.f2=pPWM->rpm.f2;
-	if((ex_board_io.toggle.u8 != board_io.toggle.u8)){
-		JENHUJIN_SWITCH_CHANGE_FLAG=1;
-		printf("\r\n(#1111)CHANGE_EVT |board_io[%d] |ctl_pwm.io[%d] \r\n",board_io.toggle.jenhujin, inputRaw.io.toggle.jenhujin);
-	}
-	ex_board_io=board_io;
 
-	if(JENHUJIN_SWITCH_CHANGE_FLAG){
-		printf("@@@@@@@CHANGE_FLAG@@@@@@@@@@\r\n");
-		inputRaw.source_pwm.f1 =0;
-		inputRaw.source_pwm.f2 =0;
-		if(fabs(inputRaw.target_pwm.f1)<0.2f && fabs(inputRaw.target_pwm.f2)<0.2f)
-		{
-			inputRaw.io.toggle=board_io.toggle;
-			JENHUJIN_SWITCH_CHANGE_FLAG=0;
-		}
-	}
-	currentPWM1 = PWM_UpdateRoutine(inputRaw.source_pwm.f1, currentPWM1, sysFlag.stop_throttle);
-	currentPWM2 = PWM_UpdateRoutine(inputRaw.source_pwm.f2, currentPWM2, sysFlag.stop_throttle);
+	inputRaw.source_pwm.f1 = (fm2000_gpio.FNR1 == 1) ? adc_to_pwm(ladcValue[0]) :
+	                         (fm2000_gpio.FNR1 == 2) ? -adc_to_pwm(ladcValue[0]) : 0.0f;
+	inputRaw.source_pwm.f2 = (fm2000_gpio.FNR2 == 1) ? adc_to_pwm(ladcValue[1]) :
+	                         (fm2000_gpio.FNR2 == 2) ? -adc_to_pwm(ladcValue[1]) : 0.0f;
 
-	imsi.f1=currentPWM1;
-	imsi.f2=currentPWM2;
-	switch(inputRaw.io.toggle.jenhujin){
-		case 0:
-			break;
-		case 1:
-			break;
-		case 2://역방향
-			imsi.f1 *=-1.0f;
-			imsi.f2 *=-1.0f;
-			break;
-		default:
-			break;
-	}
-	inputRaw.target_pwm.f1=imsi.f1;
-	inputRaw.target_pwm.f2=imsi.f2;
-	//printf("evt[%d] ctl_pwm.io.toggle.jenhujin[%d] target_pwm.fpwm1[%.1f] currentPWM[%.1f/%.1f] source_pwm[%.1f] rpm[%.1f/%.1f]\r\n", JENHUJIN_SWITCH_CHANGE_FLAG, ctl_pwm.io.toggle.jenhujin, ctl_pwm.target_pwm.fpwm1, currentPWM1, currentPWM2, ctl_pwm.source_pwm.fpwm1, ctl_pwm.rpm.fpwm1, ctl_pwm.rpm.fpwm2);
+	inputRaw.target_pwm.f1 = Calcu_fm2000_motor_pwm(ladcValue[0], fm2000_gpio.FNR1, fm2000_dir1, currentPWM1, fm2000_dir_change_wait1);
+	inputRaw.target_pwm.f2 = Calcu_fm2000_motor_pwm(ladcValue[1], fm2000_gpio.FNR2, fm2000_dir2, currentPWM2, fm2000_dir_change_wait2);
+	inputRaw.source_pwm.f1 = (fm2000_dir1 == 1) ? adc_to_pwm(ladcValue[0]) :
+	                         (fm2000_dir1 == 2) ? -adc_to_pwm(ladcValue[0]) : 0.0f;
+	inputRaw.source_pwm.f2 = (fm2000_dir2 == 1) ? adc_to_pwm(ladcValue[1]) :
+	                         (fm2000_dir2 == 2) ? -adc_to_pwm(ladcValue[1]) : 0.0f;
+	return;
 }
 
 LIFT_BUTTON data_class::Get_localGPIO(){
 	LIFT_BUTTON btn;
 	uint8_t rdata=0;
-		rdata|=!!(HAL_GPIO_ReadPin(pIO_AP_GPIO_Port, pIO_AP_Pin));
-		rdata<<=1;
-		rdata|=!!(HAL_GPIO_ReadPin(pIO_AN_GPIO_Port, pIO_AN_Pin));
-		rdata %=3;
-		if(sysFlag.canReady) btn.castLimit=rdata;
-		else{
-		//TBD for FNR switch
-		}
+//		rdata|=!!(HAL_GPIO_ReadPin(pIO_AP_GPIO_Port, pIO_AP_Pin));
+//		rdata<<=1;
+//		rdata|=!!(HAL_GPIO_ReadPin(pIO_AN_GPIO_Port, pIO_AN_Pin));
+//		rdata %=3;
+//		btn.castLimit=rdata;
 
-		rdata=0;
-		rdata|=!!(HAL_GPIO_ReadPin(pIO_BP_GPIO_Port, pIO_BP_Pin));
-		rdata<<=1;
-		rdata|=!!(HAL_GPIO_ReadPin(pIO_BN_GPIO_Port, pIO_BN_Pin));
-		rdata %=3;
-		btn.castUPDN=rdata;
-
-		rdata=0;
-		rdata|=!!(HAL_GPIO_ReadPin(pIO_CP_GPIO_Port, pIO_CP_Pin));
-		rdata<<=1;
-		rdata|=!!(HAL_GPIO_ReadPin(pIO_CN_GPIO_Port, pIO_CN_Pin));
-		rdata %=3;
-		btn.lift_Xud=rdata;
+//		rdata=0;
+//		rdata|=!!(HAL_GPIO_ReadPin(pIO_BP_GPIO_Port, pIO_BP_Pin));
+//		rdata<<=1;
+//		rdata|=!!(HAL_GPIO_ReadPin(pIO_BN_GPIO_Port, pIO_BN_Pin));
+//		rdata %=3;
+//		btn.castUPDN=rdata;
+//
+//		rdata=0;
+//		rdata|=!!(HAL_GPIO_ReadPin(pIO_CP_GPIO_Port, pIO_CP_Pin));
+//		rdata<<=1;
+//		rdata|=!!(HAL_GPIO_ReadPin(pIO_CN_GPIO_Port, pIO_CN_Pin));
+//		rdata %=3;
+//		btn.liftUPDN=rdata;
 	return btn;
 }
 
-POSITION_ANGLE data_class::CAN_Board_INPUT(bool isCan)
-{
-	POSITION_ANGLE ret;
-	DoubleF_VALUE imsi;
-
-	if(!isCan){
-		memset(&ret,0,sizeof(POSITION_ANGLE));
-		return ret;
-	}
-	motor1_polarity=0;
-	motor2_polarity=0;
-	brake_delay=vcu_sdu.canBrakeDelay;
-	batt.use_battery_voltage=vcu_sdu.canBattery;
-	batt.motor_spec_voltage =vcu_sdu.canBattery;
-
-	ret.io.btn=vcu_sdu.btn;
-	ret.io.toggle=vcu_sdu.toggle;
-	ret.source_pwm.f1=(vcu_sdu.LeftMotor_velocity/1000.0f);
-	ret.source_pwm.f2=(vcu_sdu.RightMotor_velocity/1000.0f);
-
-	ret.rpm.f1=pPWM->rpm.f1;
-	ret.rpm.f2=pPWM->rpm.f2;
-	imsi=ret.source_pwm;
-
-	ret.target_pwm=imsi;
-	//cprintf(C_YELLOW, "source_pwm[%.1f^%.1f] gamsok_ratio[%.1f] target_pwm[%.1f^%.1f]\r\n",ret.source_pwm.f1, ret.source_pwm.f2, gamsok_ratio[gamsok_idx], ret.target_pwm.f1, ret.target_pwm.f2);
-	return ret;
-}
-
-
 void data_class::one_millisec_routine()
 {
-	pPWM->PWM_1ms();
+	//pPWM->PWM_1ms();
+
 }
 
-void data_class::can_process_routine(){
-		inputRaw=CAN_Board_INPUT(true);
-        HOLD_Emergency = inputRaw.io.btn.emergency;
+void data_class::force_pwm_off_for_over_current()
+{
+	inputRaw.target_pwm.f1 = 0.0f;
+	inputRaw.target_pwm.f2 = 0.0f;
+	inputRaw.source_pwm.f1 = 0.0f;
+	inputRaw.source_pwm.f2 = 0.0f;
+	currentPWM1 = 0.0f;
+	currentPWM2 = 0.0f;
+	if(pPWM != 0) {
+		pPWM->Update_PWM(1, 0.0f, 0.0f);
+		pPWM->brake_on_flag = 0;
+	}
+	HAL_GPIO_WritePin(pSD_GPIO_Port, pSD_Pin, GPIO_PIN_RESET);
 }
 
 void data_class::ten_millisec_routine()
 {
 
 	//printf("ten_millisec_routine can_TimeOut[%d]\r\n",pCAN->can_TimeOut);
+	Get_AdcData();
+	update_current();
+	if(over_current_protect) {
+		if(pFND595 != 0) pFND595->PrintDigit(ERROR_CODE_9_OVER_CURRENT);
+		return;
+	}
+
+	if(over_current_retry_wait_10ms_cnt > 0) {
+		force_pwm_off_for_over_current();
+		if(pFND595 != 0) pFND595->PrintDigit(ERROR_CODE_9_OVER_CURRENT);
+		over_current_retry_wait_10ms_cnt--;
+		if(over_current_retry_wait_10ms_cnt == 0 && PWR_ON_Flg) {
+			HAL_GPIO_WritePin(pSD_GPIO_Port, pSD_Pin, GPIO_PIN_SET);
+			over_current_10ms_cnt = 0;
+		}
+		return;
+	}
+
+	if(batt.measure_m12_current >= MAX_CURRENT) {
+		if(over_current_10ms_cnt < OVER_CURRENT_DETECT_10MS_TICK) over_current_10ms_cnt++;
+		if(over_current_10ms_cnt >= OVER_CURRENT_DETECT_10MS_TICK) {
+			over_current_retry_count++;
+			error_code.over_current = 1;
+			error_code.code = ERROR_CODE_9_OVER_CURRENT;
+			if(pFND595 != 0) pFND595->PrintDigit(ERROR_CODE_9_OVER_CURRENT);
+			force_pwm_off_for_over_current();
+
+			if(over_current_retry_count >= OVER_CURRENT_RETRY_MAX) {
+				over_current_protect = 1;
+				if(PWR_ON_Flg) power_off();
+			}
+			else {
+				over_current_retry_wait_10ms_cnt = OVER_CURRENT_RETRY_WAIT_10MS_TICK;
+			}
+			return;
+		}
+	}
+	else {
+		over_current_10ms_cnt = 0;
+	}
+
+	if(fet_temp_protect) {
+		if(pFND595 != 0) pFND595->PrintDigit(ERROR_CODE_3_FET_OVER_TEMPERATURE);
+		force_pwm_off_for_over_current();
+		return;
+	}
 	local_lift=Get_localGPIO();//can과 상관없이 처리
 
 	 if(pCAN->can_TimeOut>0)pCAN->can_TimeOut--;
@@ -400,8 +522,7 @@ void data_class::ten_millisec_routine()
 	}
 	else {
 		sysFlag.canReady = 0;
-		inputRaw.source_pwm.f1=0;
-		inputRaw.source_pwm.f2=0;
+		ON_Board_INPUT(); // CAN 없을 때 로컬 입력(스위치/포텐쇼/리밋) 사용
 	}
 
 	if(current_state != prev_state) {
@@ -410,22 +531,29 @@ void data_class::ten_millisec_routine()
 	}
 
 //++++++++++++
-	float stop_pwm1=fabs(inputRaw.source_pwm.f1);
-	float stop_pwm2=fabs(inputRaw.source_pwm.f2);
-	pPWM->Update_PWM(0, inputRaw.target_pwm.f1, inputRaw.target_pwm.f2);
-	pPWM->CheckBrakeState(stop_pwm1, stop_pwm2);
+	float fet_temp_pwm_scale = get_fet_temp_pwm_scale();
+	pPWM->Update_PWM(1,
+			inputRaw.target_pwm.f1 * fet_temp_pwm_scale,
+			inputRaw.target_pwm.f2 * fet_temp_pwm_scale);
+	pPWM->brake_on_flag=0;
 
 //liftControl++
-	if(pPWM->brake_on_flag && (inputRaw.io.btn.ioMsg==0))
+	if(inputRaw.io.btn.ioMsg==0)
 	{
 		LIFT_BUTTON llift;
 		//printf("lift_control castUPDN[%d] lift_Xud[%d] castLimit[%d]\r\n",local_lift.castUPDN, local_lift.lift_Xud, local_lift.castLimit);
+		//0 normal
+		//1 downlimit
+		//2 up limit
+		//3 all limit
+		//castUPDN=1:UP   2:DN
 		llift.castUPDN=(local_lift.castUPDN)?local_lift.castUPDN:inputRaw.io.btn.castUPDN;
-		if(local_lift.castLimit==1 && llift.castUPDN==1) llift.castUPDN=0;
-		if(local_lift.castLimit==2 && llift.castUPDN==2) llift.castUPDN=0;
+		if(local_lift.castLimit==2 && llift.castUPDN==1) llift.castUPDN=0;
+		if(local_lift.castLimit==1 && llift.castUPDN==2) llift.castUPDN=0;
+		if(local_lift.castLimit==3) llift.castUPDN=0;
 
-		llift.lift_Xud=(local_lift.lift_Xud)?local_lift.lift_Xud:inputRaw.io.btn.lift_Xud;
-		lift_control(llift.lift_Xud, llift.castUPDN);
+		llift.liftUPDN=(local_lift.liftUPDN)?local_lift.liftUPDN:inputRaw.io.btn.lift_Xud;
+		lift_control(llift.liftUPDN, llift.castUPDN);
 	}
 	//pSpary control
 	if(inputRaw.io.btn.ioMsg==2 && PWR_ON_Flg){
@@ -439,138 +567,89 @@ void data_class::ten_millisec_routine()
 	}
 //liftControl--
 
-	if(PWR_ON_Flg){
-		if(pPWM->brake_on_flag) HAL_GPIO_WritePin(pRY3_GPIO_Port, pRY3_Pin, GPIO_PIN_RESET);
-		else HAL_GPIO_WritePin(pRY3_GPIO_Port, pRY3_Pin, GPIO_PIN_SET);
-	}
-	else HAL_GPIO_WritePin(pRY3_GPIO_Port, pRY3_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(pRY3_GPIO_Port, pRY3_Pin, GPIO_PIN_RESET);
 }
 
 void data_class::hnd_millisec_routine(){
 	if(sysFlag.SaveEEPROM){
 		sysFlag.SaveEEPROM=0;
-		memcpy(&pDataClass->setup_data, &pCAN->setup_data, sizeof(CONFIG_TOTAL));
-		pFlash_mem->save_to_flash_config(pDataClass->setup_data);
-		printf("###SaveEEPROM===\r\n");
+		printf("###SaveEEPROM ignored: SYSTEM_CONF disabled===\r\n");
 	}
 	if(pDataClass->sysFlag.canReady)CAN_DCU_Information();
 }
 
 void data_class::onesec_routine()
 {
-#if 0
-	uint16_t one_sec_adc[16] = {0};
-	
-	// === ADC 하드웨어 진단 START ===
-	printf("\n=== ADC Hardware Diagnostic ===\n");
-	
-	// 1. 내부 온도 센서 테스트 (ADC는 정상 동작하는지 확인)
-	ADC_ChannelConfTypeDef sConfig = {0};
-	sConfig.Rank = ADC_REGULAR_RANK_1;
-	sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
-	
-	// Discontinuous 모드 일시 비활성화
-	hadc1.Init.DiscontinuousConvMode = DISABLE;
-	hadc1.Init.ContinuousConvMode = DISABLE;
-	hadc1.Init.ScanConvMode = DISABLE;
-	hadc1.Init.NbrOfConversion = 1;
-	HAL_ADC_Init(&hadc1);
-	
-	// 1-1. 내부 온도센서 테스트
-	sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;
-	HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-	HAL_ADC_Start(&hadc1);
-	if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK) {
-		uint16_t temp_sensor = HAL_ADC_GetValue(&hadc1);
-		printf("Internal TEMP sensor: %d (ADC OK if ~1400-1600)\n", temp_sensor);
-	} else {
-		printf("ERROR: Internal TEMP sensor timeout!\n");
-	}
-	HAL_ADC_Stop(&hadc1);
-	
-	// 1-2. 내부 기준전압(VREF) 테스트
-	sConfig.Channel = ADC_CHANNEL_VREFINT;
-	HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-	HAL_ADC_Start(&hadc1);
-	if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK) {
-		uint16_t vref = HAL_ADC_GetValue(&hadc1);
-		printf("Internal VREF: %d (should be ~1200-1500)\n", vref);
-	} else {
-		printf("ERROR: Internal VREF timeout!\n");
-	}
-	HAL_ADC_Stop(&hadc1);
-	
-	printf("=== External Channels Test ===\n");
-	
-	// 2. 외부 채널 테스트
-	uint32_t channels[10] = {
-		ADC_CHANNEL_0, ADC_CHANNEL_1, ADC_CHANNEL_2, ADC_CHANNEL_3, ADC_CHANNEL_4,
-		ADC_CHANNEL_5, ADC_CHANNEL_6, ADC_CHANNEL_7, ADC_CHANNEL_14, ADC_CHANNEL_15
-	};
-	
-	const char* ch_names[10] = {
-		"CH0(PA0)", "CH1(PA1)", "CH2(PA2)", "CH3(PA3)", "CH4(PA4-FET_TEMP)",
-		"CH5(PA5-MOT_TEMP)", "CH6(PA6)", "CH7(PA7-VBAT)", "CH14(PC4)", "CH15(PC5)"
-	};
-	
-	for(int i=0; i<10; i++){
-		sConfig.Channel = channels[i];
-		HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-		
-		HAL_ADC_Start(&hadc1);
-		if(HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK) {
-			one_sec_adc[i] = HAL_ADC_GetValue(&hadc1);
-			
-			// 문제 진단
-			if(one_sec_adc[i] == 0) {
-				printf("%s: %d [WARN: GND or disconnected]\n", ch_names[i], one_sec_adc[i]);
-			} else if(one_sec_adc[i] >= 4090) {
-				printf("%s: %d [WARN: VCC or open circuit]\n", ch_names[i], one_sec_adc[i]);
-			} else {
-				printf("%s: %d [OK]\n", ch_names[i], one_sec_adc[i]);
-			}
-		} else {
-			printf("%s: TIMEOUT [ERROR]\n", ch_names[i]);
-			one_sec_adc[i] = 0;
-		}
-		HAL_ADC_Stop(&hadc1);
-	}
-	
-	// 원래 설정으로 복구
-	hadc1.Init.DiscontinuousConvMode = ENABLE;
-	hadc1.Init.NbrOfDiscConversion = 1;
-	hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
-	hadc1.Init.NbrOfConversion = 10;
-	HAL_ADC_Init(&hadc1);
-	
-	printf("=================================\n\n");
-#endif
-	Get_AdcData();
 	batt.fet_temp=get_ntc_temperature(ladcValue[4]);
 	batt.motor_temp=(int8_t)get_ntc_temperature(ladcValue[5]);
-	if(pPWM->brake_on_flag)//No EMB_RelayOn
-	{
-		batt.measure_emb_resister=(float)get_emb_resister(ladcValue[7], ladcValue[6]);
+	// FET 과열 보호: limit_fet_temp 초과 1초 지속시 전원 차단
+	if((int8_t)batt.fet_temp >= FET_TEMP_PWM_OFF) {
+		if(!fet_temp_protect) {
+			printf("### FET TEMP PWM OFF! [%d >= %d]\r\n", batt.fet_temp, FET_TEMP_PWM_OFF);
+		}
+		fet_temp_protect = 1;
+		fet_temp_over_cnt = 0;
+		error_code.fet_over_temperature = 1;
+		error_code.code = ERROR_CODE_3_FET_OVER_TEMPERATURE;
+		if(pFND595 != 0) pFND595->PrintDigit(ERROR_CODE_3_FET_OVER_TEMPERATURE);
+		force_pwm_off_for_over_current();
 	}
-	batt.measure_battery_voltage=(float)get_voltage(ladcValue[7]);
-	batt.measure_m1_current=(float)(ladcValue[8]);
-	batt.measure_m2_current=(float)(ladcValue[9]);
-	batt.measure_m12_current = fmaxf(fabs(batt.measure_m1_current), fabs(batt.measure_m2_current));
-	batt.measure_m12_current -=2715.0f;
-#if 1
+	else if(fet_temp_protect && (int8_t)batt.fet_temp <= FET_TEMP_RESTART) {
+		printf("### FET TEMP AUTO RESTART ENABLE! [%d <= %d]\r\n", batt.fet_temp, FET_TEMP_RESTART);
+		fet_temp_protect = 0;
+		fet_temp_over_cnt = 0;
+		if(PWR_ON_Flg) HAL_GPIO_WritePin(pSD_GPIO_Port, pSD_Pin, GPIO_PIN_SET);
+	}
+	else if((int8_t)batt.fet_temp >= FET_TEMP_DERATE_START) {
+		error_code.fet_over_temperature = 1;
+		error_code.code = ERROR_CODE_3_FET_OVER_TEMPERATURE;
+	}
+	else {
+		fet_temp_over_cnt = 0;
+	}
+//	if(pPWM->brake_on_flag)//No EMB_RelayOn
+//	{
+//		batt.measure_emb_resister=(float)get_emb_resister(ladcValue[7], ladcValue[6]);
+//	}
+	batt.measure_battery_voltage=get_voltage(ladcValue[7]);
+	update_error_code_once_per_second();
+	display_error_code_once_per_second();
+
+	printf("FNR1[%d] FNR2[%d] error[%d] [%.1fV/%.2fA] FT[%d] src[%.2f,%.2f] tgt[%.2f,%.2f] [%lu,%lu] ADC[%d,%d,%d,%d]\r\n",
+			fm2000_gpio.FNR1,
+			fm2000_gpio.FNR2,
+			error_code.code,
+			batt.measure_battery_voltage,
+			batt.measure_m12_current,
+			batt.fet_temp,
+			inputRaw.source_pwm.f1,
+			inputRaw.source_pwm.f2,
+			inputRaw.target_pwm.f1,
+			inputRaw.target_pwm.f2,
+			ladcValue[2],ladcValue[3],
+			ladcValue[6],ladcValue[7],ladcValue[8],ladcValue[9]);
+
+
 //printf("Potentio_val[%04d] limit[%04d] toggle[%02d] mi_dir[%d] m2_dir[%d]\r\n", Potentio_val, vcu_sdu.limit, vcu_sdu.toggle.u8, sysFlag.motor_dir1, sysFlag.motor_dir2);
-	printf("pid_k[%.2f] accel[%04d] decel[%04d] brake_delay[%04d] brake_rate[%04d] use_battery_voltage[%.1f] measure_emb_resister[%.1f] current[%.1f+%.1f=%.1f]\r\n",
-			pidCONF.Kp,  setup_data.conf2.accel, setup_data.conf2.decel,brake_delay, setup_data.conf2.brake_rate,
-			batt.use_battery_voltage,batt.measure_emb_resister, batt.measure_m1_current, batt.measure_m2_current, batt.measure_m12_current);
+//	printf("brake_delay[%04d]  use_battery_voltage[%.1f] measure_emb_resister[%.1f] currentA[%.1f+%.1f=%.1f]\r\n",
+//			brake_delay, batt.use_battery_voltage,batt.measure_emb_resister, batt.measure_m1_current, batt.measure_m2_current, batt.measure_m12_current);
 //	printf("ex_pwm1[%04d] ex_pwm1[%04d] state[%d]\r\n",gMAIN.ex_pwm1,  gMAIN.ex_pwm2, gMAIN.flg_state.u8);
-	printf("HOLD_Emergency[%d] emb_delay[%d] forward[%.1f^%.1f]\r\n", HOLD_Emergency,brake_delay, set_foreward, set_backward);
-	printf("[BUTTON] JENHUJIN1[%d] stopBTN_lr[%d] lift_Xud[%d] lift_Wud[%d]\r\n",board_io.toggle.jenhujin, board_io.toggle.t_sw, board_io.btn.lift_Xud, board_io.btn.castUPDN);
-	printf("inport[%x] stop[%d][%d] \r\n", board_io.toggle.u8,  gMAIN.flg_state.stop1, gMAIN.flg_state.stop2);
-	printf("fet_temp[%d/%d] motor_temp[%d/%d] battery_voltage[%.f|%d]\r\n",batt.fet_temp,ladcValue[4], batt.motor_temp,ladcValue[5], batt.measure_battery_voltage, ladcValue[7]);
-	printf("vr[%.2f/%.2f] rpm[%.1f|%.1f] target_rpm[%.1f|%.1f] eRPM[%.1f|%.1f] \r\n",
-			inputRaw.source_pwm.f1, inputRaw.source_pwm.f2, inputRaw.rpm.f1, inputRaw.rpm.f2,pPWM->target_rpm.f1, pPWM->target_rpm.f2, pPWM->error_rpm.f1, pPWM->error_rpm.f2);
+//	printf("HOLD_Emergency[%d] emb_delay[%d] forward[%.1f^%.1f]\r\n", HOLD_Emergency,brake_delay, set_foreward, set_backward);
+//	printf("lift_Xud[%d] lift_Wud[%d]\r\n", board_io.btn.lift_Xud, board_io.btn.castUPDN);
+//	printf("stop[%d][%d]\r\n", gMAIN.flg_state.stop1, gMAIN.flg_state.stop2);
+//	printf("fet_temp[%d/%d] motor_temp[%d/%d] battery_voltage[%.f|%d]\r\n",batt.fet_temp,ladcValue[4], batt.motor_temp,ladcValue[5], batt.measure_battery_voltage, ladcValue[7]);
+#if 0
+	printf("[CONF] batt_v=%d lim_I=%d lim_mT=%d lim_fT=%d alrm_B=%d cart=%d pol1=%d pol2=%d\r\n",
+		sysConf.battery_voltage, sysConf.limit_current, sysConf.limit_motor_temp, sysConf.limit_fet_temp,
+		sysConf.alarm_Battery, sysConf.cart_type, sysConf.motor1_polarity, sysConf.motor2_polarity);
+	printf("[CONF] tbd=%d offset=%d slip=%d fwd=%d bwd=%d accel=%d decel=%d brk_dly=%d brk_rate=%d\r\n",
+		sysConf.tbd, sysConf.tottle_offset, sysConf.stop_slip,
+		sysConf.foreward, sysConf.backward, sysConf.accel, sysConf.decel,
+		sysConf.brake_delay, sysConf.brake_rate);
+//	printf("vr[%.2f/%.2f] rpm[%.1f|%.1f] target_rpm[%.1f|%.1f] eRPM[%.1f|%.1f] \r\n",
+//			inputRaw.source_pwm.f1, inputRaw.source_pwm.f2, inputRaw.rpm.f1, inputRaw.rpm.f2,pPWM->target_rpm.f1, pPWM->target_rpm.f2, pPWM->error_rpm.f1, pPWM->error_rpm.f2);
 #endif
-	relay_control();
+	//relay_control();
 }
 //
 //void data_class::packRPM(int16_t rpm1, int16_t rpm2, uint8_t current, uint8_t out[4])
@@ -686,14 +765,16 @@ void data_class::unpack7(const uint8_t in[7], int16_t &rpm1, int16_t &rpm2, uint
 
 void data_class::CAN_DCU_Information(){
 	CAN_UP_FLAG_DATA upFlag;
-	uint32_t Pub_ID=0x5B8;
+	uint32_t Pub_ID=0x588;
 	uint8_t buf[8]={0,};
 	uint8_t pack_buf[7]={0,};
 
-	int16_t rpm1=(int16_t)pPWM->rpm.f1;//(uint8_t)(fabs(inputRaw.rpm.f1)/100.0f);
-	int16_t rpm2=(int16_t)pPWM->rpm.f2;//(uint8_t)(fabs(inputRaw.rpm.f2)/100.0f);
-	uint8_t current=(uint16_t)batt.measure_m12_current/16;
-	uint16_t batt10=(uint16_t)batt.measure_battery_voltage+5;//0.5V보정
+	// 전송용 RPM 보정: 전진/후진 동일 배율
+	// 제어 변수 pPWM->rpm 은 변경하지 않음
+	int16_t rpm1 = (int16_t)(pPWM->rpm.f1 * 1.667f);
+	int16_t rpm2 = (int16_t)(pPWM->rpm.f2 * 1.667f);
+	uint8_t current=(uint16_t)batt.measure_m12_current;//unit A
+	uint16_t batt10=(uint16_t)(batt.measure_battery_voltage*10)+5;//0.5V보정
 	uint8_t motor_temp7=(uint8_t)batt.motor_temp;
 	uint8_t fet_temp7=(uint8_t)batt.fet_temp;
 
@@ -714,7 +795,7 @@ void data_class::CAN_DCU_Information(){
 	upFlag.can_ready=1;
 
 	if(inputRaw.io.btn.ioMsg==2){
-		upFlag.limitSwitch=local_lift.lift_Xud;//방제차-limitSwitch
+		upFlag.limitSwitch=local_lift.liftUPDN;//방제차-limitSwitch
 		upFlag.spray=pSpary;
 	}
 //(4byte-32bit) 12bit+12bit+8bit  rpm1(12bit) + rpm2(12bit) + current(8bit)
@@ -768,20 +849,28 @@ void data_class::MakeDCU_Data()
 }
 void data_class::Get_AdcData()
 {
+	uint16_t adc[16]={0,};
 	for(int i=0;i<10;i++){
 		HAL_ADC_Start(&hadc1);
 		HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-		ladcValue[i]=HAL_ADC_GetValue(&hadc1);
+		adc[i]=HAL_ADC_GetValue(&hadc1);
+		//ladcValue[i]=HAL_ADC_GetValue(&hadc1);
 	}
+	memcpy(ladcValue,adc,32);
+	ladcValue[0]=get_m0_filter(adc[0]);
+	ladcValue[1]=get_m1_filter(adc[1]);
+	ladcValue[2]=get_m2_filter(adc[2],0.05f);//over current detect
+	ladcValue[3]=get_m3_filter(adc[3],0.05f);//over current detect
+	ladcValue[6]=get_m6_filter(adc[6],0.1f);//wcs current detect
+	ladcValue[8]=get_m8_filter(adc[8],0.05f);//bemf detect
+	ladcValue[9]=get_m9_filter(adc[9],0.05f);//bemf detect
 }
 
-uint16_t data_class::get_voltage(uint16_t value)
+float data_class::get_voltage(uint16_t value)
 {
-	uint16_t voltage;
-	float t = (float)value * 3.3f / 0xfff; // 읽은 센서값을 전압으로 변경
-    t=t*520;//51K 1K x10
-    voltage=(uint16_t)t;
-    return voltage;
+	float voltage = (float)value * 3.3f / 0xfff; // 읽은 센서값을 전압으로 변경
+	voltage=voltage*520;//51K 1K x10
+    return voltage/10.0f;
 }
 
 //float data_class::get_emb_resister(uint16_t acc_adc, uint16_t value)
@@ -848,11 +937,122 @@ uint16_t data_class::get_m1_filter(uint16_t adc)
   return (uint16_t)m1_value;
 }
 
-uint16_t data_class::get_m2_filter(uint16_t adc)
+uint16_t data_class::get_m2_filter(uint16_t adc, float senstivity)
 {
+
   static float m2_value;
-  m2_value=(m2_value*(1-ADC_SENSITIVITY))+(adc*ADC_SENSITIVITY);
+  m2_value=(m2_value*(1-senstivity))+(adc*senstivity);
   return (uint16_t)m2_value;
+}
+
+uint16_t data_class::get_m3_filter(uint16_t adc, float senstivity)
+{
+  static float m3_value;
+  m3_value=(m3_value*(1-senstivity))+(adc*senstivity);
+  return (uint16_t)m3_value;
+}
+
+uint16_t data_class::get_m6_filter(uint16_t adc, float senstivity)
+{
+  static float m6_value;
+  m6_value=(m6_value*(1-senstivity))+(adc*senstivity);
+  return (uint16_t)m6_value;
+}
+
+uint16_t data_class::get_m8_filter(uint16_t adc, float senstivity)
+{
+  static float m8_value;
+  m8_value=(m8_value*(1-senstivity))+(adc*senstivity);
+  return (uint16_t)m8_value;
+}
+uint16_t data_class::get_m9_filter(uint16_t adc, float senstivity)
+{
+  static float m9_value;
+  m9_value=(m9_value*(1-senstivity))+(adc*senstivity);
+  return (uint16_t)m9_value;
+}
+
+//float data_class::get_wcs1600_current_ma(uint16_t adc)
+//{
+//	// WCS1600 board calibration: 1925 -> 130mA, 1940 -> 880mA.
+//	const float adc_zero = 1922.4f;
+//	const float ma_per_adc = 50.0f;
+//	float current_ma = ((float)adc - adc_zero) * ma_per_adc;
+//	if(current_ma < 0.0f) current_ma = 0.0f;
+//	return current_ma;
+//}
+
+float data_class::get_wcs1600_current(uint16_t adc)
+{
+    const float VREF = 3.3f;
+    const float ADC_MAX = 4095.0f;
+    const float SENSITIVITY = 0.0187f;
+    const uint16_t wcs_zero_adc = 1938;//2068;
+
+    float zero_voltage = ((float)wcs_zero_adc * VREF) / ADC_MAX;
+    float voltage = ((float)adc * VREF) / ADC_MAX;
+
+    return (voltage - zero_voltage) / SENSITIVITY;
+}
+
+void data_class::update_current()
+{
+	batt.measure_m12_current = get_wcs1600_current(ladcValue[6]);
+	batt.measure_m1_current = batt.measure_m12_current;
+	batt.measure_m2_current = batt.measure_m12_current;
+}
+
+void data_class::update_error_code_once_per_second()
+{
+	float measured_voltage = batt.measure_battery_voltage;
+	float low_voltage = MIN_VOLTAGE;
+	float over_voltage = MAX_VOLTAGE;
+
+	memset(&error_code,0,sizeof(ERROR_CODE_STATE));
+	error_code.low_voltage = (measured_voltage < low_voltage);
+	error_code.over_voltage = (measured_voltage > over_voltage);
+	error_code.fet_over_temperature = (fet_temp_protect || (int8_t)batt.fet_temp >= FET_TEMP_DERATE_START);
+	error_code.motor_over_temperature = ((int8_t)batt.motor_temp > LIMIT_MOTOR_TEMP);
+	error_code.motor1_fault = batt.moter_error.m1_error;
+	error_code.motor2_fault = batt.moter_error.m2_error;
+	error_code.tbd1 = 0;
+	error_code.tbd2 = 0;
+	error_code.over_current = (over_current_protect || batt.measure_m12_current >= MAX_CURRENT);
+
+	if(error_code.over_current) error_code.code = ERROR_CODE_9_OVER_CURRENT;
+	else if(error_code.fet_over_temperature) error_code.code = ERROR_CODE_3_FET_OVER_TEMPERATURE;
+	else if(error_code.low_voltage) error_code.code = ERROR_CODE_1_LOW_VOLTAGE;
+	else if(error_code.over_voltage) error_code.code = ERROR_CODE_2_OVER_VOLTAGE;
+	else if(error_code.motor_over_temperature) error_code.code = ERROR_CODE_4_MOTOR_OVER_TEMPERATURE;
+	else if(error_code.motor1_fault) error_code.code = ERROR_CODE_5_MOTOR1_FAULT;
+	else if(error_code.motor2_fault) error_code.code = ERROR_CODE_6_MOTOR2_FAULT;
+	else if(error_code.tbd1) error_code.code = ERROR_CODE_7_TBD1;
+	else if(error_code.tbd2) error_code.code = ERROR_CODE_8_TBD2;
+	else {
+		error_code.code = ERROR_CODE_0_NORMAL;
+		error_code.normal = 1;
+	}
+}
+
+void data_class::display_error_code_once_per_second()
+{
+	if(pFND595 == 0) return;
+
+	if(error_code.code != ERROR_CODE_0_NORMAL) {
+		pFND595->PrintDigit(error_code.code);
+		return;
+	}
+
+	uint8_t pattern = 0;
+
+	if(fm2000_gpio.FNR2 == 1) pattern |= FND595::SEG_B;
+	else if(fm2000_gpio.FNR2 == 2) pattern |= FND595::SEG_C;
+
+	if(fm2000_gpio.FNR1 == 1) pattern |= FND595::SEG_F;
+	else if(fm2000_gpio.FNR1 == 2) pattern |= FND595::SEG_E;
+
+	if(pattern == 0) pFND595->PrintDigit(0);
+	else pFND595->WriteRaw(pattern);
 }
 
 int8_t data_class::get_ntc_temperature(uint16_t adc)
@@ -880,44 +1080,31 @@ int8_t data_class::get_ntc_temperature(uint16_t adc)
 
 uint8_t data_class::get_switch_port(uint8_t port){
 	uint8_t rdata=0;
-	switch(port){
-	case SW_JENHUJIN:
-		rdata|=!!(HAL_GPIO_ReadPin(pIO_AP_GPIO_Port, pIO_AP_Pin));
-		rdata<<=1;
-		rdata|=!!(HAL_GPIO_ReadPin(pIO_AN_GPIO_Port, pIO_AN_Pin));
-		rdata %=3;
-		break;
-	case SW_STOP:
-		rdata|=!!(HAL_GPIO_ReadPin(pIO_BP_GPIO_Port, pIO_BP_Pin));
-		rdata<<=1;
-		rdata|=!!(HAL_GPIO_ReadPin(pIO_BN_GPIO_Port, pIO_BN_Pin));
-		rdata %=4;
-		break;
-	case SW_LIFT:
-		rdata|=!!(HAL_GPIO_ReadPin(pIO_CP_GPIO_Port, pIO_CP_Pin));
-		rdata<<=1;
-		rdata|=!!(HAL_GPIO_ReadPin(pIO_CN_GPIO_Port, pIO_CN_Pin));
-		rdata %=3;
-		break;
-	case SW_BISANG:
-		break;
-	}
 	return rdata;
+}
+
+void data_class::get_fm2000_port(){
+	uint8_t rdata=0;
+	rdata|=!!(HAL_GPIO_ReadPin(pIO_AP_GPIO_Port, pIO_AP_Pin));
+	rdata<<=1;
+	rdata|=!!(HAL_GPIO_ReadPin(pIO_AN_GPIO_Port, pIO_AN_Pin));
+	rdata %=4;
+	fm2000_gpio.FNR1=rdata;
+
+	rdata=0;
+	rdata|=!!(HAL_GPIO_ReadPin(pIO_BP_GPIO_Port, pIO_BP_Pin));
+	rdata<<=1;
+	rdata|=!!(HAL_GPIO_ReadPin(pIO_BN_GPIO_Port, pIO_BN_Pin));
+	rdata %=4;
+	fm2000_gpio.FNR2=rdata;
+	fm2000_gpio.emergency=0;//!!(HAL_GPIO_ReadPin(pIO_DN_GPIO_Port, pIO_DN_Pin));
 }
 
 void data_class::read_in_port(){
 
 	uint8_t rdata=0;
-	board_io.toggle.jenhujin=get_switch_port(SW_JENHUJIN);
-	board_io.toggle.t_sw=get_switch_port(SW_STOP);
-	//board_io.btn.lift_Xud=get_switch_port(SW_LIFT);
-
-	rdata=0;
-	rdata|=!!(HAL_GPIO_ReadPin(pIO_DP_GPIO_Port, pIO_DP_Pin));
-	if(rdata==1) {
-		HAL_Delay(10);
-		if(HAL_GPIO_ReadPin(pIO_DP_GPIO_Port, pIO_DP_Pin)) HOLD_Emergency=1;
-	}
+	get_fm2000_port();
+	if(fm2000_gpio.emergency==1) HOLD_Emergency=1;
 }
 
 int data_class::clamp(int value, int min, int max) {
