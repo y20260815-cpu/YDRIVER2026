@@ -11,7 +11,7 @@
 
 #define STABILIZE_DELAY_10MS_TICK 10
 #define ACCEL_RATE 0.02f
-#define DECEL_RATE 0.04f
+#define DECEL_RATE 0.02f
 #define DEFAULT_BRAKE_DELAY 400
 #define DEFAULT_BATTERY_VOLTAGE 24.0f
 #define DEFAULT_PID_KP 0.8f
@@ -96,11 +96,13 @@ private:
 	uint16_t get_m2_filter(uint16_t adc, float senstivity);
 	uint16_t get_m3_filter(uint16_t adc, float senstivity);
 	uint16_t get_m6_filter(uint16_t adc, float senstivity);//current
+	uint16_t get_m7_filter(uint16_t adc, float senstivity);//dc-link voltage
 	uint16_t get_m8_filter(uint16_t adc, float senstivity);
 	uint16_t get_m9_filter(uint16_t adc, float senstivity);
 
 	float get_wcs1600_current(uint16_t adc);
 	void update_current();
+	void update_short_brake_1ms();
 	void force_pwm_off_for_over_current();
 	void update_error_code_once_per_second();
 	void display_error_code_once_per_second();

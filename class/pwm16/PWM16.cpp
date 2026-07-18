@@ -149,10 +149,9 @@ DoubleF_VALUE PWM16::Dual_Motor_GetVelocty(){
 	delay_us(5);//	waiting for stable (~1ms real: delay_us*0.5us@72MHz) //2000
 
     for (int i = 0; i < samples; i++) {
-        pDataClass->Get_AdcData();
+       // pDataClass->Get_AdcData();
         sum1 += pDataClass->ladcValue[8];
         sum2 += pDataClass->ladcValue[9];
- //       HAL_Delay(1); // 1ms 대기
     }
 
     adc_raw1 = sum1 / samples;
@@ -285,6 +284,202 @@ void PWM16::Dual_Motor_set_pwm10(MOTOR_DIRECTION dm_polar, DoubleF_VALUE fSetPwm
 	htim2.Instance->CCR2=pwm6;
 	htim2.Instance->CCR3=pwm7;
 	htim2.Instance->CCR4=pwm8;
+}
+
+void PWM16::ApplyShortBrakeDuty(uint8_t brake_m1, float duty_m1,
+		uint8_t brake_m2, float duty_m2)
+{
+	if(duty_m1 < 0.0f) duty_m1 = 0.0f;
+	if(duty_m1 > 1.0f) duty_m1 = 1.0f;
+	if(duty_m2 < 0.0f) duty_m2 = 0.0f;
+	if(duty_m2 > 1.0f) duty_m2 = 1.0f;
+
+	/*
+	 * High-side outputs remain OFF. The low-side channels use LOW polarity:
+	 * CCR=1024 is coast and CCR=0 is full low-side short braking.
+	 */
+	if(brake_m1) {
+		uint16_t ccr_m1 = (uint16_t)((1.0f - duty_m1)
+				* (float)SHORT_BRAKE_PWM_PERIOD);
+		htim3.Instance->CCR1 = 0;
+		htim3.Instance->CCR2 = ccr_m1;
+		htim3.Instance->CCR3 = 0;
+		htim3.Instance->CCR4 = ccr_m1;
+	}
+	if(brake_m2) {
+		uint16_t ccr_m2 = (uint16_t)((1.0f - duty_m2)
+				* (float)SHORT_BRAKE_PWM_PERIOD);
+		htim2.Instance->CCR1 = 0;
+		htim2.Instance->CCR2 = ccr_m2;
+		htim2.Instance->CCR3 = 0;
+		htim2.Instance->CCR4 = ccr_m2;
+	}
+}
+
+void PWM16::ResetShortBrakeControl()
+{
+	short_brake_base_duty_m1 = 0.0f;
+	short_brake_base_duty_m2 = 0.0f;
+	short_brake_duty_m1 = 0.0f;
+	short_brake_duty_m2 = 0.0f;
+	short_brake_vdc_reference_m1 = 0.0f;
+	short_brake_vdc_reference_m2 = 0.0f;
+	short_brake_entry_pwm_m1 = 0.0f;
+	short_brake_entry_pwm_m2 = 0.0f;
+	short_brake_active_m1 = 0;
+	short_brake_active_m2 = 0;
+	short_brake_vdc_filter = 0.0f;
+	short_brake_filter_active = 0;
+}
+
+float PWM16::UpdateOneShortBrake_1ms(uint8_t brake_request,
+		float dc_link_voltage, float target_pwm_abs,
+		float &base_duty, float &output_duty,
+		float &vdc_reference, float &entry_pwm, uint8_t &active)
+{
+	if(!brake_request) {
+		base_duty = 0.0f;
+		output_duty = 0.0f;
+		vdc_reference = 0.0f;
+		entry_pwm = 0.0f;
+		active = 0;
+		return 0.0f;
+	}
+
+	if(!active) {
+		active = 1;
+		base_duty = SHORT_BRAKE_INITIAL_DUTY;
+		output_duty = SHORT_BRAKE_INITIAL_DUTY;
+		vdc_reference = dc_link_voltage;
+		entry_pwm = target_pwm_abs;
+		if(entry_pwm < 0.05f) entry_pwm = 0.05f;
+	}
+
+	// Normal brake feel follows the existing deceleration trajectory instead
+	// of an independent time ramp.
+	float decel_progress = 1.0f - (target_pwm_abs / entry_pwm);
+	if(decel_progress < SHORT_BRAKE_INITIAL_DUTY) {
+		decel_progress = SHORT_BRAKE_INITIAL_DUTY;
+	}
+	if(decel_progress > 1.0f) decel_progress = 1.0f;
+	base_duty = decel_progress;
+
+	float target_duty = base_duty;
+	float vdc_rise = dc_link_voltage - vdc_reference;
+	if(vdc_rise < 0.0f) vdc_rise = 0.0f;
+	float vdc_rise_ratio = (vdc_reference > 1.0f)
+			? (vdc_rise / vdc_reference) : 0.0f;
+
+	// Protect both the requested relative limit and the absolute capacitor
+	// limit without waiting for the duty slew.
+	if(dc_link_voltage >= SHORT_BRAKE_VDC_HARD
+			|| vdc_rise_ratio >= SHORT_BRAKE_VDC_MAX_RATIO) {
+		output_duty = 1.0f;
+		return output_duty;
+	}
+
+	if(vdc_rise > SHORT_BRAKE_VDC_RISE_START) {
+		// Keep normal voltage correction limited below +8 %. The +10 %
+		// boundary above remains the final protection override.
+		float ratio_duty;
+		if(vdc_rise_ratio < SHORT_BRAKE_VDC_FULL_RATIO) {
+			ratio_duty = (vdc_rise_ratio / SHORT_BRAKE_VDC_FULL_RATIO)
+					* 0.25f;
+		}
+		else {
+			ratio_duty = 0.25f
+					+ ((vdc_rise_ratio - SHORT_BRAKE_VDC_FULL_RATIO)
+					/ (SHORT_BRAKE_VDC_MAX_RATIO
+							- SHORT_BRAKE_VDC_FULL_RATIO)) * 0.75f;
+		}
+		if(ratio_duty > target_duty) target_duty = ratio_duty;
+	}
+
+	// Absolute-voltage protection is staged so normal DC-link feedback does
+	// not turn a smooth stop into an immediate full short.
+	if(dc_link_voltage >= SHORT_BRAKE_VDC_PROTECT && target_duty < 0.75f) {
+		target_duty = 0.75f;
+	}
+	else if(dc_link_voltage >= SHORT_BRAKE_VDC_WARN && target_duty < 0.45f) {
+		target_duty = 0.45f;
+	}
+	if(target_duty > 1.0f) target_duty = 1.0f;
+
+	if(target_duty < 0.0f) target_duty = 0.0f;
+
+	float rise_step = SHORT_BRAKE_RAMP_PER_MS;
+	if(dc_link_voltage >= SHORT_BRAKE_VDC_PROTECT
+			|| vdc_rise_ratio >= 0.08f) {
+		rise_step = SHORT_BRAKE_DUTY_FAST_STEP;
+	}
+	else if(dc_link_voltage >= SHORT_BRAKE_VDC_WARN
+			|| vdc_rise_ratio >= 0.05f) {
+		rise_step = SHORT_BRAKE_DUTY_WARN_STEP;
+	}
+	else if(vdc_rise > SHORT_BRAKE_VDC_RISE_START) {
+		rise_step = SHORT_BRAKE_DUTY_VDC_STEP;
+	}
+	if(output_duty < target_duty) {
+		output_duty += rise_step;
+		if(output_duty > target_duty) output_duty = target_duty;
+	}
+	else if(output_duty > target_duty) {
+		// Release braking slowly to prevent DC-link feedback hunting and the
+		// resulting audible/mechanical torque step.
+		output_duty -= SHORT_BRAKE_DUTY_RELEASE_STEP;
+		if(output_duty < target_duty) output_duty = target_duty;
+	}
+
+	return output_duty;
+}
+
+void PWM16::UpdateShortBrakeControl_1ms(uint8_t brake_m1, uint8_t brake_m2,
+		float target_pwm_abs_m1, float target_pwm_abs_m2,
+		float dc_link_voltage)
+{
+	if(!short_brake_filter_active) {
+		short_brake_filter_active = 1;
+		short_brake_vdc_filter = dc_link_voltage;
+	}
+	else {
+		// Common measurements: about 4 ms switching-noise filter.
+		short_brake_vdc_filter +=
+				0.25f * (dc_link_voltage - short_brake_vdc_filter);
+	}
+
+	// Raw ADC overvoltage bypasses the filter delay.
+	if(dc_link_voltage >= SHORT_BRAKE_VDC_HARD) {
+		short_brake_vdc_filter = dc_link_voltage;
+	}
+
+	if(!brake_m1 && !brake_m2) {
+		// Keep the common DC-link filter alive so each motor captures the
+		// pre-braking voltage, but reset the two independent brake states.
+		short_brake_base_duty_m1 = 0.0f;
+		short_brake_base_duty_m2 = 0.0f;
+		short_brake_duty_m1 = 0.0f;
+		short_brake_duty_m2 = 0.0f;
+		short_brake_vdc_reference_m1 = 0.0f;
+		short_brake_vdc_reference_m2 = 0.0f;
+		short_brake_entry_pwm_m1 = 0.0f;
+		short_brake_entry_pwm_m2 = 0.0f;
+		short_brake_active_m1 = 0;
+		short_brake_active_m2 = 0;
+		return;
+	}
+
+	float duty_m1 = UpdateOneShortBrake_1ms(brake_m1,
+			short_brake_vdc_filter, target_pwm_abs_m1,
+			short_brake_base_duty_m1, short_brake_duty_m1,
+			short_brake_vdc_reference_m1, short_brake_entry_pwm_m1,
+			short_brake_active_m1);
+	float duty_m2 = UpdateOneShortBrake_1ms(brake_m2,
+			short_brake_vdc_filter, target_pwm_abs_m2,
+			short_brake_base_duty_m2, short_brake_duty_m2,
+			short_brake_vdc_reference_m2, short_brake_entry_pwm_m2,
+			short_brake_active_m2);
+
+	ApplyShortBrakeDuty(brake_m1, duty_m1, brake_m2, duty_m2);
 }
 
 DoubleF_VALUE PWM16::pidCalibration(uint8_t disable_pid, DoubleF_VALUE input, DoubleF_VALUE pid_pwm)

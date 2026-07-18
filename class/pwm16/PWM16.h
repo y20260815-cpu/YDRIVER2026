@@ -22,6 +22,21 @@
 #define EMB_RELEASE_DELAY_TICK (EMB_RELEASE_DELAY_MS / 10)  // 10ms 틱 기준
 #define EMB_SOFTSTART_RATE    0.05f  // 매 10ms마다 5% 증가 → 0→100% = 200ms
 
+// PWM short-brake control (1 ms update)
+#define SHORT_BRAKE_RAMP_PER_MS       0.0003f
+#define SHORT_BRAKE_INITIAL_DUTY       0.01f
+#define SHORT_BRAKE_VDC_RISE_START    0.2f
+#define SHORT_BRAKE_VDC_FULL_RATIO    0.08f
+#define SHORT_BRAKE_VDC_MAX_RATIO     0.10f
+#define SHORT_BRAKE_VDC_WARN          45.0f
+#define SHORT_BRAKE_VDC_PROTECT       52.0f
+#define SHORT_BRAKE_VDC_HARD          58.0f
+#define SHORT_BRAKE_DUTY_VDC_STEP     0.01f
+#define SHORT_BRAKE_DUTY_WARN_STEP    0.02f
+#define SHORT_BRAKE_DUTY_FAST_STEP    0.05f
+#define SHORT_BRAKE_DUTY_RELEASE_STEP 0.002f
+#define SHORT_BRAKE_PWM_PERIOD        1024
+
 class PWM16
 {
 private:
@@ -81,6 +96,28 @@ uint16_t emb_release_delay=0;
 // EMB 해제 후 소프트스타트 제한값 (0.0→1.0 점진 증가)
 float emb_softstart_pwm=1.0f;
 
+// Per-motor low-side PWM short-brake state
+float short_brake_base_duty_m1=0.0f;
+float short_brake_base_duty_m2=0.0f;
+float short_brake_duty_m1=0.0f;
+float short_brake_duty_m2=0.0f;
+float short_brake_vdc_reference_m1=0.0f;
+float short_brake_vdc_reference_m2=0.0f;
+float short_brake_entry_pwm_m1=0.0f;
+float short_brake_entry_pwm_m2=0.0f;
+uint8_t short_brake_active_m1=0;
+uint8_t short_brake_active_m2=0;
+
+// DC-link voltage measurement is shared.
+float short_brake_vdc_filter=0.0f;
+uint8_t short_brake_filter_active=0;
+void ApplyShortBrakeDuty(uint8_t brake_m1, float duty_m1,
+		uint8_t brake_m2, float duty_m2);
+float UpdateOneShortBrake_1ms(uint8_t brake_request,
+		float dc_link_voltage, float target_pwm_abs,
+		float &base_duty, float &output_duty,
+		float &vdc_reference, float &entry_pwm, uint8_t &active);
+
 // Slew-rate: 1ms 루프에서 target을 천천히 추종하는 현재 출력값
 DoubleF_VALUE slew_pwm;
 
@@ -116,6 +153,10 @@ void Update_PWM(uint8_t disable_pid, float target_pwm1, float target_pwm2);
 void Dual_Motor_set_pwm10(MOTOR_DIRECTION dm_polar, DoubleF_VALUE fSetPwm, uint8_t disable_pid);
 //void Get_Motor_Vref(uint8_t time_out);
 void CheckBrakeState(float stop_pwm1, float stop_pwm2);
+void UpdateShortBrakeControl_1ms(uint8_t brake_m1, uint8_t brake_m2,
+		float target_pwm_abs_m1, float target_pwm_abs_m2,
+		float dc_link_voltage);
+void ResetShortBrakeControl();
 void Calibrate_BEMF_Offset();
 //void PWM_1ms();
 };

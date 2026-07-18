@@ -310,6 +310,8 @@ float data_class::Calcu_fm2000_motor_pwm(uint16_t adc_value, uint8_t fnr, uint8_
 		dir_change_wait_cnt = 0;
 	}
 
+	// Never open the bridge abruptly when the volume reaches zero.
+	// First ramp the drive PWM down; short braking takes over near zero.
 	current_pwm = PWM_UpdateRoutine(target_pwm, current_pwm, sysFlag.stop_throttle);
 	return current_pwm;
 }
@@ -445,8 +447,42 @@ LIFT_BUTTON data_class::Get_localGPIO(){
 
 void data_class::one_millisec_routine()
 {
-	//pPWM->PWM_1ms();
+	update_short_brake_1ms();
+}
 
+void data_class::update_short_brake_1ms()
+{
+	if(pPWM == 0) return;
+
+	uint8_t m1_neutral = (fm2000_gpio.FNR1 != 1 && fm2000_gpio.FNR1 != 2);
+	uint8_t m2_neutral = (fm2000_gpio.FNR2 != 1 && fm2000_gpio.FNR2 != 2);
+
+	// On an FNR -> neutral transition, enter the controlled-brake state
+	// immediately so UpdateOneShortBrake_1ms() captures the actual target PWM
+	// at that instant. The initial short duty is still only 1 %, and subsequent
+	// duty follows the deceleration progress from that captured value.
+	float source_abs_m1 = fabsf(inputRaw.source_pwm.f1);
+	float source_abs_m2 = fabsf(inputRaw.source_pwm.f2);
+	float target_abs_m1 = fabsf(inputRaw.target_pwm.f1);
+	float target_abs_m2 = fabsf(inputRaw.target_pwm.f2);
+	uint8_t decel_m1 = (source_abs_m1 + 0.10f < target_abs_m1);
+	uint8_t decel_m2 = (source_abs_m2 + 0.10f < target_abs_m2);
+	uint8_t brake_m1 = m1_neutral || decel_m1
+			|| (source_abs_m1 <= 0.05f);
+	uint8_t brake_m2 = m2_neutral || decel_m2
+			|| (source_abs_m2 <= 0.05f);
+	uint8_t protection_active = over_current_protect || fet_temp_protect
+			|| (over_current_retry_wait_10ms_cnt > 0) || !PWR_ON_Flg;
+
+	if(protection_active) {
+		pPWM->ResetShortBrakeControl();
+		return;
+	}
+
+	float dc_link_fast = get_voltage(adc_buf[7]);
+	pPWM->UpdateShortBrakeControl_1ms(
+			brake_m1, brake_m2, target_abs_m1, target_abs_m2,
+			dc_link_fast);
 }
 
 void data_class::force_pwm_off_for_over_current()
@@ -535,6 +571,9 @@ void data_class::ten_millisec_routine()
 	pPWM->Update_PWM(1,
 			inputRaw.target_pwm.f1 * fet_temp_pwm_scale,
 			inputRaw.target_pwm.f2 * fet_temp_pwm_scale);
+	// Update_PWM writes the normal bridge state; restore controlled braking
+	// immediately instead of leaving a full short until the next 1 ms tick.
+	update_short_brake_1ms();
 	pPWM->brake_on_flag=0;
 
 //liftControl++
@@ -576,6 +615,20 @@ void data_class::hnd_millisec_routine(){
 		printf("###SaveEEPROM ignored: SYSTEM_CONF disabled===\r\n");
 	}
 	if(pDataClass->sysFlag.canReady)CAN_DCU_Information();
+
+	printf("FNR1[%d] FNR2[%d] error[%d] [%.1fV/%.2fA] FT[%d] src[%.2f,%.2f] tgt[%.2f,%.2f] [%lu,%lu] ADC[%d,%d,%d,%d]\r\n",
+			fm2000_gpio.FNR1,
+			fm2000_gpio.FNR2,
+			error_code.code,
+			batt.measure_battery_voltage,
+			batt.measure_m12_current,
+			batt.fet_temp,
+			inputRaw.source_pwm.f1,
+			inputRaw.source_pwm.f2,
+			inputRaw.target_pwm.f1,
+			inputRaw.target_pwm.f2,
+			ladcValue[2],ladcValue[3],
+			ladcValue[6],ladcValue[7],ladcValue[8],ladcValue[9]);
 }
 
 void data_class::onesec_routine()
@@ -611,23 +664,23 @@ void data_class::onesec_routine()
 //	{
 //		batt.measure_emb_resister=(float)get_emb_resister(ladcValue[7], ladcValue[6]);
 //	}
-	batt.measure_battery_voltage=get_voltage(ladcValue[7]);
+//	batt.measure_battery_voltage=get_voltage(ladcValue[7]);
 	update_error_code_once_per_second();
 	display_error_code_once_per_second();
 
-	printf("FNR1[%d] FNR2[%d] error[%d] [%.1fV/%.2fA] FT[%d] src[%.2f,%.2f] tgt[%.2f,%.2f] [%lu,%lu] ADC[%d,%d,%d,%d]\r\n",
-			fm2000_gpio.FNR1,
-			fm2000_gpio.FNR2,
-			error_code.code,
-			batt.measure_battery_voltage,
-			batt.measure_m12_current,
-			batt.fet_temp,
-			inputRaw.source_pwm.f1,
-			inputRaw.source_pwm.f2,
-			inputRaw.target_pwm.f1,
-			inputRaw.target_pwm.f2,
-			ladcValue[2],ladcValue[3],
-			ladcValue[6],ladcValue[7],ladcValue[8],ladcValue[9]);
+//	printf("FNR1[%d] FNR2[%d] error[%d] [%.1fV/%.2fA] FT[%d] src[%.2f,%.2f] tgt[%.2f,%.2f] [%lu,%lu] ADC[%d,%d,%d,%d]\r\n",
+//			fm2000_gpio.FNR1,
+//			fm2000_gpio.FNR2,
+//			error_code.code,
+//			batt.measure_battery_voltage,
+//			batt.measure_m12_current,
+//			batt.fet_temp,
+//			inputRaw.source_pwm.f1,
+//			inputRaw.source_pwm.f2,
+//			inputRaw.target_pwm.f1,
+//			inputRaw.target_pwm.f2,
+//			ladcValue[2],ladcValue[3],
+//			ladcValue[6],ladcValue[7],ladcValue[8],ladcValue[9]);
 
 
 //printf("Potentio_val[%04d] limit[%04d] toggle[%02d] mi_dir[%d] m2_dir[%d]\r\n", Potentio_val, vcu_sdu.limit, vcu_sdu.toggle.u8, sysFlag.motor_dir1, sysFlag.motor_dir2);
@@ -851,10 +904,7 @@ void data_class::Get_AdcData()
 {
 	uint16_t adc[16]={0,};
 	for(int i=0;i<10;i++){
-		HAL_ADC_Start(&hadc1);
-		HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-		adc[i]=HAL_ADC_GetValue(&hadc1);
-		//ladcValue[i]=HAL_ADC_GetValue(&hadc1);
+		adc[i]=adc_buf[i];
 	}
 	memcpy(ladcValue,adc,32);
 	ladcValue[0]=get_m0_filter(adc[0]);
@@ -862,8 +912,10 @@ void data_class::Get_AdcData()
 	ladcValue[2]=get_m2_filter(adc[2],0.05f);//over current detect
 	ladcValue[3]=get_m3_filter(adc[3],0.05f);//over current detect
 	ladcValue[6]=get_m6_filter(adc[6],0.1f);//wcs current detect
+	ladcValue[7]=get_m7_filter(adc[7],0.1f);//dc-link voltage detect
 	ladcValue[8]=get_m8_filter(adc[8],0.05f);//bemf detect
 	ladcValue[9]=get_m9_filter(adc[9],0.05f);//bemf detect
+	batt.measure_battery_voltage=get_voltage(ladcValue[7]);
 }
 
 float data_class::get_voltage(uint16_t value)
@@ -957,6 +1009,13 @@ uint16_t data_class::get_m6_filter(uint16_t adc, float senstivity)
   static float m6_value;
   m6_value=(m6_value*(1-senstivity))+(adc*senstivity);
   return (uint16_t)m6_value;
+}
+
+uint16_t data_class::get_m7_filter(uint16_t adc, float senstivity)
+{
+  static float m7_value;
+  m7_value=(m7_value*(1-senstivity))+(adc*senstivity);
+  return (uint16_t)m7_value;
 }
 
 uint16_t data_class::get_m8_filter(uint16_t adc, float senstivity)

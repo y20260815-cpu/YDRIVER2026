@@ -39,7 +39,7 @@
 //#include "../../class/bigint/BigInt.h"
 //#include "../../class/tm1637/TM1637.h"
 #define ADC_CHANNEL_COUNT 10
-extern uint16_t adc_buf[ADC_CHANNEL_COUNT];
+extern volatile uint16_t adc_buf[ADC_CHANNEL_COUNT];
 /////////////////////////////////////
 //#define xDBG_BOARD
 //#define xDBG_EVENT

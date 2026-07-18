@@ -22,6 +22,7 @@
 #include "main.h"
 #include "adc.h"
 #include "can.h"
+#include "dma.h"
 #include "iwdg.h"
 #include "tim.h"
 #include "usart.h"
@@ -42,7 +43,7 @@
 /* USER CODE BEGIN PD */
 #define BUFFER_SIZE 64
 #define MAX_RX_BUFFER_SIZE 64
-uint16_t adc_buf[ADC_CHANNEL_COUNT];
+volatile uint16_t adc_buf[ADC_CHANNEL_COUNT];
 
 uint8_t one_millisec_flag=0;
 uint8_t ten_millisec_flag=0;
@@ -159,6 +160,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USART1_UART_Init();
   MX_IWDG_Init();
   MX_ADC1_Init();
@@ -189,6 +191,12 @@ int main(void)
   HAL_TIM_Base_Start_IT(&htim4);  // TIM4 ?��?��?��?�� ?��?��
   __HAL_IWDG_START(&hiwdg);//40KHZ LCLK 128분주-3125 10(312.5*10)//4000
   HAL_ADCEx_Calibration_Start(&hadc1);
+  if (HAL_ADC_Start_DMA(&hadc1, (uint32_t *)(void *)adc_buf, ADC_CHANNEL_COUNT) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* Continuous scan is consumed by polling the DMA buffer; avoid an IRQ per scan. */
+  __HAL_DMA_DISABLE_IT(hadc1.DMA_Handle, DMA_IT_HT | DMA_IT_TC);
   printf("\r\n******** Start *******\r\n");
   HAL_Delay(500);
   pDataClass->power_off();
@@ -255,15 +263,15 @@ int main(void)
 
 
 //=========================================
+	  if(one_millisec_flag){
+		  one_millisec_flag=0;
+		  //printf("x");
+		  pDataClass->one_millisec_routine();
+	  }
 	  if(ten_millisec_flag){
 		  ten_millisec_flag=0;
 		  //printf("10\r\n");
 		  pDataClass->ten_millisec_routine();
-	  }
-	  else if(one_millisec_flag){
-		  one_millisec_flag=0;
-		  //printf("x");
-		  pDataClass->one_millisec_routine();
 	  }
 
 //==========================================
