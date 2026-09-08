@@ -29,6 +29,7 @@ class FND595
 {
 private:
 	uint8_t last_pattern = 0;
+	uint8_t decimal_point_forced = 0;
 	uint8_t active_high = 1;
 	uint8_t msb_first = 1;
 	uint16_t pulse_delay_us = 1000;

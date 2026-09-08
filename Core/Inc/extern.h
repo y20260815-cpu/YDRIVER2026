@@ -15,6 +15,8 @@
 #include "can.h"
 #include "usart.h"
 #include "../../class/tja1050/tja1050.h"
+#include "../../class/dc_link/dc_link.h"
+#include "../../class/shunt_oc/shunt_oc.h"
 #include "../../class/data_class/dataclass.h"
 #include "../../class/pwm16/pwm16.h"
 #include "../../class/fnd595/fnd595.h"
@@ -156,6 +158,8 @@ void delay_us(uint32_t us);
 void cprintf(ccolor_t color, const char *fmt, ...);
 
 extern tja1050 *pCAN;
+extern dc_link *pDcLink;
+extern shunt_oc *pShuntOc;
 extern data_class *pDataClass;
 extern PWM16 *pPWM;
 extern FND595 *pFND595;
@@ -168,6 +172,10 @@ extern SYSTEM_CONF sysConf;
 extern uint8_t SYSTEM_setup_data_ok;
 extern uint16_t rpm;
 extern PID_CONFIG pidCONF;
+extern ENUM_SYSTEM_TYPE systemControlType;
+extern uint8_t can_process_flag;
+extern uint8_t as_can_mode;
+extern volatile uint32_t control_millis;
 //extern uint8_t rxBuffer[RX_BUFFER_SIZE];
 
 //--------------------------------------------------

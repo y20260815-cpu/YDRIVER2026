@@ -111,6 +111,9 @@ void FND595::wait_ms(uint16_t ms)
 
 void FND595::WriteRaw(uint8_t pattern)
 {
+	if(decimal_point_forced) pattern |= SEG_DP;
+	// When not forced, preserve the DP bit supplied by PrintHex/PrintDigit.
+	// Clearing it here made their dot argument ineffective.
 	last_pattern = pattern;
 	HAL_GPIO_WritePin(FND595_LATCH_GPIO_Port, FND595_LATCH_Pin, GPIO_PIN_RESET);
 	shift_byte(apply_polarity(map_segments(pattern)));
@@ -171,8 +174,11 @@ void FND595::PrintMinus(uint8_t dot)
 
 void FND595::SetDecimalPoint(uint8_t on)
 {
-	if(on) WriteRaw(last_pattern | SEG_DP);
-	else WriteRaw(last_pattern & (uint8_t)~SEG_DP);
+	decimal_point_forced = on ? 1 : 0;
+	uint8_t pattern = last_pattern;
+	if(on) pattern |= SEG_DP;
+	else pattern &= (uint8_t)~SEG_DP;
+	WriteRaw(pattern);
 }
 
 void FND595::SetActiveHigh(uint8_t on)

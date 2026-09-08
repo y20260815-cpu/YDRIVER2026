@@ -10,14 +10,14 @@
 using namespace std;
 
 #define DRIVER_BD2
+#define WCS1600 1
 #define ADC_SENSITIVITY 0.1f
-#define ZIGBEE_REMAIN 40 //400ms
-#define ZIGBEE_MY_ID 0xCC
-#define MOTOR_MAX_RPM 2100.0f //3600.0f
+//#define ZIGBEE_REMAIN 40 //400ms
+//#define ZIGBEE_MY_ID 0xCC
+#define MOTOR_MAX_RPM 3600.0f //3600.0f
 #define MOTOR_MIN_RPM 30.0f
 
 #define OPAMP_GAIN 0.0567f////A= R2/R3=6.8K/120k=0.0567
-//#define OPAMP_GAIN 0.056f//adjust
 #define DEADZONE_THRESHOLD 0.05f
 #define STOP_INPUT_PWM 0.1f
 
@@ -101,8 +101,8 @@ typedef union _PORT_INPUT
 
 typedef struct _RELAY
 {
-  uint8_t MC1:1;
-  uint8_t MC2:1;
+  uint8_t MC1:1;  // DC-Link main relay (pRY1)
+  uint8_t MC2:1;  // DC-Link precharge relay (pRY2)
   uint8_t BRAKE:1;
   uint8_t UP:1;
   uint8_t DN:1;
@@ -210,7 +210,7 @@ typedef struct _MY_BATTERY
 	float measure_emb_resister;
 	float measure_m1_current;
 	float measure_m2_current;
-	float measure_m12_current;
+	float measure_hall_current;
 
 	float motor_spec_voltage;
 	float motor_spec_currente;
@@ -287,6 +287,14 @@ typedef union _LIFT_BUTTON {
 //buf[5] = LO_UINT16(_RightMotor_velocity);
 //buf[6] = _my_toggle.u8;
 //buf[7] = _my_button.u8;
+
+typedef enum {
+	NO_CAN = 0,
+	SAMBOO_BANGJAE,
+	SAMBOO_LIFT,
+	AS_CONTROL,
+	FM_CONTROL,
+} ENUM_SYSTEM_TYPE;
 
 typedef struct
 {

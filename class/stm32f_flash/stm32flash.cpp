@@ -165,7 +165,8 @@ void stm32flash::Get_BackUP(){
 	//memcpy(pData, &setup_init, sizeof(CONFIG_TOTAL));
 	//for(i=0;i<20;i++)printf("[%d][%d]\r\n", i,pData[i] );
 
-	pDataClass->brake_delay=sysConf.brake_delay;
+	// Electromagnetic brake delay is intentionally fixed in dataclass.h.
+	pDataClass->brake_delay=ELECTROMAGNETIC_BRAKE_DELAY_MS;
 	//pDataClass->gamsok_idx=sysConf.brake_rate;
 	//pDataClass->motor1_polarity=sysConf.motor1_polarity;
 	//pDataClass->motor2_polarity=sysConf.motor2_polarity;

@@ -40,9 +40,11 @@ void MX_CAN_Init(void)
   hcan.Instance = CAN1;
   hcan.Init.Prescaler = 4;
   hcan.Init.Mode = CAN_MODE_NORMAL;
-  hcan.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan.Init.TimeSeg1 = CAN_BS1_15TQ;
-  hcan.Init.TimeSeg2 = CAN_BS2_2TQ;
+  /* Same 500 kbps (36M/4/18TQ). SJW 4 + BS2 4 widens clock tolerance to
+     ~1.1% because CAN runs from the factory-trimmed HSI, not a crystal. */
+  hcan.Init.SyncJumpWidth = CAN_SJW_4TQ;
+  hcan.Init.TimeSeg1 = CAN_BS1_13TQ;
+  hcan.Init.TimeSeg2 = CAN_BS2_4TQ;
   hcan.Init.TimeTriggeredMode = DISABLE;
   hcan.Init.AutoBusOff = DISABLE;
   hcan.Init.AutoWakeUp = DISABLE;

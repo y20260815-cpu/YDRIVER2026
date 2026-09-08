@@ -1,4 +1,4 @@
-Configuration	black_driver_103rbtx_no_can
+Configuration	2026ydriver
 STM32CubeMX 	6.12.0
 Date	12/26/2024
 MCU	STM32F103RCTx
@@ -149,8 +149,8 @@ Pin Nb	PINs	FUNCTIONs	LABELs
 SOFTWARE PROJECT
 
 Project Settings : 
-Project Name : black_driver_103rbtx_no_can
-Project Folder : C:\Users\thpark\Dropbox\jvr_project\prj-stm32ide\vcu\black_driver_103rbtx_no_can
+Project Name : 2026ydriver
+Project Folder : C:\Users\thpark\Dropbox\jvr_project\prj-stm32ide\vcu\2026ydriver
 Toolchain / IDE : STM32CubeIDE
 Firmware Package Name and Version : STM32Cube FW_F1 V1.8.6
 

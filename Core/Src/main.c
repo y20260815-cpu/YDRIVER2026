@@ -58,6 +58,10 @@ uint8_t rx_flag=0;
 uint16_t rpm=0;
 //uint16_t rpm_duration_cnt=0;
 uint8_t SYSTEM_setup_data_ok=0;
+uint8_t can_process_flag=0;
+volatile uint32_t control_millis=0;
+ENUM_SYSTEM_TYPE systemControlType=NO_CAN;
+uint8_t as_can_mode=0;
 SYSTEM_CONF sysConf;
 PID_CONFIG pidCONF;
 
@@ -75,9 +79,9 @@ extern "C" int _write(int32_t file, uint8_t *ptr, int32_t len)
 #else
 int _write(int32_t file, uint8_t *ptr, int32_t len) {
 #endif
+	/* Keep UART3 clean for the 100 ms CSV telemetry protocol. */
 	HAL_StatusTypeDef tx1 = HAL_UART_Transmit(&huart1, ptr, len, len);
-	HAL_StatusTypeDef tx3 = HAL_UART_Transmit(&huart3, ptr, len, len);
-	if(tx1 == HAL_OK || tx3 == HAL_OK) return len;
+	if(tx1 == HAL_OK) return len;
 	else return 0;
 }
 
@@ -148,6 +152,10 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
+	/* Reset flags survive reset. Capture them before clearing so a 48 V test
+	 * can distinguish power loss from watchdog recovery after a CPU halt. */
+	const uint32_t boot_reset_csr = RCC->CSR;
+	__HAL_RCC_CLEAR_RESET_FLAGS();
 
   /* USER CODE END Init */
 
@@ -164,6 +172,7 @@ int main(void)
   MX_USART1_UART_Init();
   MX_IWDG_Init();
   MX_ADC1_Init();
+  MX_ADC2_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
   MX_CAN_Init();
@@ -171,9 +180,51 @@ int main(void)
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  printf("===MAIN START===..\r\n");
+  printf("===MAIN START=== RESET_CSR=0x%08lX\r\n", (unsigned long)boot_reset_csr);
+  if(boot_reset_csr & RCC_CSR_IWDGRSTF) printf("### RESET CAUSE: IWDG (main loop stalled or HardFault) ###\r\n");
+  if(boot_reset_csr & RCC_CSR_WWDGRSTF) printf("### RESET CAUSE: WWDG ###\r\n");
+  if(boot_reset_csr & RCC_CSR_SFTRSTF)  printf("### RESET CAUSE: SOFTWARE RESET ###\r\n");
+  if(boot_reset_csr & RCC_CSR_PORRSTF)  printf("### RESET CAUSE: POWER-ON / POWER-DOWN ###\r\n");
+  if(boot_reset_csr & RCC_CSR_PINRSTF)  printf("### RESET CAUSE: NRST PIN ###\r\n");
+  if(boot_reset_csr & RCC_CSR_LPWRRSTF) printf("### RESET CAUSE: LOW-POWER RESET ###\r\n");
+
+  /* UART3 is the browser-monitor port. Send a machine-readable boot event so
+     a reset remains visible even when UART1 debug is not connected. */
+  {
+    const char *reset_name = "UNKNOWN";
+    char reset_line[64];
+    if(boot_reset_csr & RCC_CSR_IWDGRSTF) reset_name = "IWDG";
+    else if(boot_reset_csr & RCC_CSR_WWDGRSTF) reset_name = "WWDG";
+    else if(boot_reset_csr & RCC_CSR_SFTRSTF) reset_name = "SOFTWARE";
+    else if(boot_reset_csr & RCC_CSR_PORRSTF) reset_name = "POWER";
+    else if(boot_reset_csr & RCC_CSR_PINRSTF) reset_name = "NRST";
+    else if(boot_reset_csr & RCC_CSR_LPWRRSTF) reset_name = "LOW_POWER";
+    const int reset_len = snprintf(reset_line, sizeof(reset_line),
+        "$RESET,0x%08lX,%s\r\n", (unsigned long)boot_reset_csr, reset_name);
+    if(reset_len > 0) {
+      HAL_UART_Transmit(&huart3, (uint8_t *)reset_line, (uint16_t)reset_len, 50);
+    }
+  }
+
+  /* CON1 4-5 jumper strap: PA8(pin5) pulled to 3.3V(pin4) selects AS mode.
+     Pull-down keeps PA8 low when the jumper is absent. */
+  {
+    GPIO_InitTypeDef g = {0};
+    g.Pin = GPIO_PIN_8;
+    g.Mode = GPIO_MODE_INPUT;
+    g.Pull = GPIO_PULLDOWN;
+    HAL_GPIO_Init(GPIOA, &g);
+    HAL_Delay(2);
+    if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8) == GPIO_PIN_SET) {
+      as_can_mode = 1;
+      systemControlType = AS_CONTROL;
+      printf("### AS-CAN MODE (CON1 4-5 jumper detected) ###\r\n");
+    }
+  }
 
   pCAN = new tja1050();
+  pDcLink = new dc_link();
+  pShuntOc = new shunt_oc();
   pDataClass=new data_class();
   pPWM=new PWM16();
   pFND595=new FND595();
@@ -191,6 +242,7 @@ int main(void)
   HAL_TIM_Base_Start_IT(&htim4);  // TIM4 ?��?��?��?�� ?��?��
   __HAL_IWDG_START(&hiwdg);//40KHZ LCLK 128분주-3125 10(312.5*10)//4000
   HAL_ADCEx_Calibration_Start(&hadc1);
+  HAL_ADCEx_Calibration_Start(&hadc2);
   if (HAL_ADC_Start_DMA(&hadc1, (uint32_t *)(void *)adc_buf, ADC_CHANNEL_COUNT) != HAL_OK)
   {
     Error_Handler();
@@ -226,9 +278,9 @@ int main(void)
   printf("(4) pDataClass->power_on..\r\n");
   pDataClass->power_on();
   pDataClass->HOLD_Emergency=0;
-  //pFND595->PrintDigit(5);
-  //pFND595->TestSegments();
-  pFND595->PrintDigit(0);
+  // Vehicle mode is fixed by the PA8 strap at boot: A=AS, F=Follow Me.
+  // The decimal point is added by the 1 s task only while CAN is alive.
+  pFND595->PrintHex(as_can_mode ? 0x0AU : 0x0FU, 0);
   //pFND595->TestOutputBits();
   /* USER CODE END 2 */
 
@@ -261,6 +313,10 @@ int main(void)
 		  pCAN->canSetConfig();
 	  }
 
+	  if(can_process_flag){
+		  can_process_flag=0;
+		  pDataClass->can_process_routine();
+	  }
 
 //=========================================
 	  if(one_millisec_flag){
@@ -362,6 +418,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   static uint16_t one_milisec_tick=0;
   if (htim->Instance == TIM4)
   {
+	  control_millis++;
 	  one_milisec_tick++;
 	  one_millisec_flag=1;
 	  if(one_milisec_tick>9){

@@ -82,8 +82,10 @@ void Error_Handler(void);
 #define pIO_AN_GPIO_Port GPIOB
 #define pIO_BN_Pin GPIO_PIN_12
 #define pIO_BN_GPIO_Port GPIOC
+// MC1: DC-Link main relay
 #define pRY1_Pin GPIO_PIN_2
 #define pRY1_GPIO_Port GPIOD
+// MC2: DC-Link precharge relay
 #define pRY2_Pin GPIO_PIN_4
 #define pRY2_GPIO_Port GPIOB
 #define pRY3_Pin GPIO_PIN_5

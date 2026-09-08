@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>2026 Y-Driver UART3 Monitor</title>
+<style>
+:root{color-scheme:dark;--bg:#07111f;--panel:#0e1b2d;--line:#20344e;--text:#e8f1fb;--muted:#8ca1b8;--cyan:#38d8ff;--green:#62e6a7;--yellow:#ffd166;--red:#ff647c}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#102b48 0,var(--bg) 35%);font:14px system-ui,sans-serif;color:var(--text)}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:18px 22px;border-bottom:1px solid var(--line);background:#07111fcc;position:sticky;top:0;z-index:2}h1{font-size:20px;margin:0 auto 0 0}button{border:1px solid #315373;border-radius:8px;padding:9px 14px;background:#15304a;color:var(--text);cursor:pointer}button.primary{background:#087c9b;border-color:#22bfe7}button:disabled{opacity:.45}.dot{width:9px;height:9px;border-radius:50%;background:#68798b}.dot.on{background:var(--green);box-shadow:0 0 10px var(--green)}.dot.fault{background:var(--red);box-shadow:0 0 12px var(--red)}.session-time{position:fixed;top:13px;left:50%;transform:translateX(-50%);z-index:4;display:flex;align-items:center;gap:12px;padding:7px 12px;border:1px solid var(--line);border-radius:8px;background:#0b192a;color:var(--muted);font-size:12px;white-space:nowrap}.session-time b{color:var(--text);font:700 16px ui-monospace,monospace}.session-time .elapsed{color:var(--cyan)}
+main{max-width:1500px;margin:auto;padding:18px}.notice{color:var(--muted);margin:0 0 14px}.cards{display:flex;flex-direction:column;gap:10px}.card-row{position:relative;display:grid;gap:10px}.card-row.common{grid-template-columns:repeat(8,minmax(0,1fr))}.card-row.motor{grid-template-columns:repeat(5,minmax(0,1fr));padding-left:42px}.row-title{position:absolute;left:0;top:50%;transform:translateY(-50%);width:34px;text-align:center;font-weight:800;font-size:15px}.row-title.m1{color:#38d8ff}.row-title.m2{color:#ff647c}.card,.chart,.io,.log{background:linear-gradient(145deg,#102238,#0b1727);border:1px solid var(--line);border-radius:12px;padding:14px}.card-row.motor .card{min-height:98px}.label{color:var(--muted);font-size:12px}.value{font-size:24px;font-weight:700;margin-top:5px}.unit{font-size:12px;color:var(--muted);margin-left:3px}.charts{display:grid;grid-template-columns:1fr;gap:12px;margin-top:12px}.chart{position:relative}.chart h2,.io h2,.log h2{font-size:14px;margin:0 0 8px;color:#b9cbe0}canvas{display:block;width:100%;height:300px;cursor:crosshair}.tooltip{display:none;position:absolute;z-index:3;pointer-events:none;padding:8px 10px;border:1px solid #42617d;border-radius:7px;background:#06101dee;color:#eaf5ff;font:12px ui-monospace,monospace;line-height:1.5;white-space:nowrap;box-shadow:0 5px 18px #0008}.measure{margin-top:10px;padding:10px 12px;border:1px dashed #365471;border-radius:8px;color:var(--muted)}.measure table{width:100%;margin-top:8px;border-collapse:collapse;color:var(--text);font-size:12px}.measure th,.measure td{padding:5px 8px;border-top:1px solid var(--line);text-align:right}.measure th:first-child,.measure td:first-child{text-align:left}.bottom{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}.io-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.io-item{border:1px solid var(--line);border-radius:7px;padding:7px;text-align:center}.io-item strong{display:block;margin-top:3px}.ok{color:var(--green)}.bad{color:var(--red)}pre{height:145px;overflow:auto;margin:0;color:#9fb5ca;font:12px ui-monospace,monospace;white-space:pre-wrap}@media(max-width:1000px){.card-row.common{grid-template-columns:repeat(4,minmax(140px,1fr))}.card-row.motor{grid-template-columns:repeat(3,minmax(140px,1fr))}}@media(max-width:800px){.bottom{grid-template-columns:1fr}.charts canvas{height:240px}.measure{overflow-x:auto}.card-row.common,.card-row.motor{grid-template-columns:repeat(2,minmax(130px,1fr))}}
+.stepper{display:flex;gap:5px;margin-top:9px}.stepper button{flex:1;padding:4px 6px;font-size:11px}.stepper button:disabled{cursor:not-allowed}.accel-prediction{display:flex;align-items:baseline;justify-content:space-between;margin-top:7px;padding-top:7px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}.accel-prediction strong{color:var(--cyan);font-size:16px}.power-strip,.brake-strip{position:relative;margin-top:10px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:#091827}.power-head,.brake-head{display:flex;align-items:center;justify-content:space-between;color:#b9cbe0;font-size:12px}.power-values{display:flex;gap:18px;flex-wrap:wrap;font-weight:700}.power-values .volt{color:#ffd166}.power-values .amp{color:#22d3ee}.power-values .fet{color:#f8f9fa}.power-values .motor{color:#e879f9}.brake-badge{min-width:88px;text-align:center;border-radius:999px;padding:3px 10px;font-weight:800}.brake-badge.off{color:#07111f;background:var(--green)}.brake-badge.on{color:white;background:var(--red);box-shadow:0 0 12px #ff647c66}#power{height:145px}#brake{height:56px;cursor:default}
+</style>
+</head>
+<body>
+<div class="session-time"><span>시작 <b id="started-at">--:--:--</b></span><span>경과 <b id="elapsed" class="elapsed">00:00</b></span></div>
+<header><span id="dot" class="dot"></span><h1>Y-Driver · UART3 Telemetry</h1><button id="connect" class="primary">시리얼 연결</button><button id="demo">데모 실행</button><button id="pause">그래프 일시정지</button><button id="save">CSV 저장</button><button id="clear">초기화</button></header>
+<main>
+<p class="notice" id="status">115200 baud · 연결 대기 중 (Chrome/Edge Web Serial)</p>
+<section class="cards" id="cards"></section>
+<section class="charts"><div class="chart"><h2>CAN / PWM / RPM <span class="label">(채널별 full-scale)</span></h2><canvas id="motion"></canvas><div id="motion-tip" class="tooltip"></div><div class="power-strip"><div class="power-head"><b>전압 / 전류 / 온도</b><span class="power-values"><span id="power-volt" class="volt">전압 -- V · MAX -- V</span><span id="power-amp" class="amp">전류 -- A · MAX -- A</span><span id="power-fet" class="fet">FET -- °C</span><span id="power-motor" class="motor">Motor -- °C</span></span></div><canvas id="power"></canvas><div id="power-tip" class="tooltip"></div></div><div class="brake-strip"><div class="brake-head"><b>전자브레이크</b><span id="brake-state" class="brake-badge off">OFF · 해제</span></div><canvas id="brake"></canvas></div><div id="measure" class="measure">그래프에서 시작점과 끝점을 차례로 클릭하세요.</div></div></section>
+<section class="bottom"><div class="io"><h2>입력 및 상태</h2><div class="io-grid" id="io"></div></div><div class="log"><h2>수신 로그</h2><pre id="log"></pre></div></section>
+</main>
+<script>
+'use strict';
+const F=['time','source','canReady','adc1','adc2','fnr1','fnr2','toggle','button','accelRaw','byte3Raw','canCmd1','canCmd2','targetPwm1','targetPwm2','pwm1','pwm2','rawRpm1','rawRpm2','rpm1','rpm2','fetTemp','motorTemp','voltage','current','embBrake','error'];
+const brakeF=['time','source','canReady','adc1','adc2','fnr1','fnr2','toggle','button','accelRaw','byte3Raw','canCmd1','canCmd2','pwm1','pwm2','rpm1','rpm2','fetTemp','motorTemp','voltage','current','embBrake','error'];
+const currentF=['time','source','canReady','adc1','adc2','fnr1','fnr2','toggle','button','accelRaw','byte3Raw','canCmd1','canCmd2','pwm1','pwm2','rpm1','rpm2','fetTemp','motorTemp','voltage','current','error'];
+const accelF=['time','source','canReady','adc1','adc2','fnr1','fnr2','toggle','button','accelRaw','canCmd1','canCmd2','pwm1','pwm2','rpm1','rpm2','fetTemp','motorTemp','voltage','current','error'];
+const previousF=['time','source','canReady','adc1','adc2','fnr1','fnr2','toggle','button','canCmd1','canCmd2','pwm1','pwm2','rpm1','rpm2','fetTemp','motorTemp','voltage','current','error'];
+const legacyF=['time','source','canReady','adc1','adc2','fnr1','fnr2','toggle','button','pwm1','pwm2','rpm1','rpm2','fetTemp','motorTemp','voltage','current','error'];
+const numeric=new Set(F.filter(x=>x!=='source')), history=[], rows=[];
+let port,reader,running=false,demoTimer=null,partial='',graphPaused=false,measureStart=null,measureEnd=null,dragHandle=null,predictionAccelRaw=null,sessionStartedAt=null,lastDataAt=null,lastDeviceTime=null,uartStallShown=false,maxVoltage=0,maxCurrent=0;
+// Motor 1 uses blue/green shades; Motor 2 uses red/orange/yellow shades.
+// Indices follow motionSeries: CAN1, CAN2, PWM1-T, PWM2-T, PWM1-A,
+// PWM2-A, RPM1-RAW, RPM2-RAW, RPM1-OBS, RPM2-OBS, then sensors.
+const $=id=>document.getElementById(id), colors=['#38d8ff','#ff647c','#67e8f9','#fda4af','#34d399','#f97316','#60a5fa','#fb7185','#6ee7b7','#facc15','#f8f9fa','#e879f9','#ffd166','#22d3ee'];
+const commonCardDefs=[['accelMenu','ESP32 가속 설정','menu'],['accelRaw','CAN BYTE2 실제 RX','raw'],['accelApplied','STM32 가속시간','s'],['byte3Raw','CAN BYTE3 RX','raw'],['voltage','DC 전압','V'],['current','전류','A'],['fetTemp','FET 온도','°C'],['motorTemp','모터 온도','°C']];
+const m1CardDefs=[['canCmd1','CAN 명령','raw'],['targetPwm1','PWM 목표',''],['pwm1','PWM 실제',''],['rawRpm1','RPM RAW','rpm'],['rpm1','RPM 관측','rpm']];
+const m2CardDefs=[['canCmd2','CAN 명령','raw'],['targetPwm2','PWM 목표',''],['pwm2','PWM 실제',''],['rawRpm2','RPM RAW','rpm'],['rpm2','RPM 관측','rpm']];
+const cardDefs=[...commonCardDefs,...m1CardDefs,...m2CardDefs];
+const motionSeries=[{key:'canCmd1',name:'CAN1',scale:1,fullScale:1000},{key:'canCmd2',name:'CAN2',scale:1,fullScale:1000},{key:'targetPwm1',name:'PWM1-T',scale:100,fullScale:100,unit:'%',dash:[3,4]},{key:'targetPwm2',name:'PWM2-T',scale:100,fullScale:100,unit:'%',dash:[3,4]},{key:'pwm1',name:'PWM1-A',scale:100,fullScale:100,unit:'%'},{key:'pwm2',name:'PWM2-A',scale:100,fullScale:100,unit:'%'},{key:'rawRpm1',name:'RPM1-RAW',scale:1,fullScale:3600,unit:' rpm',dash:[3,4]},{key:'rawRpm2',name:'RPM2-RAW',scale:1,fullScale:3600,unit:' rpm',dash:[3,4]},{key:'rpm1',name:'RPM1-OBS',scale:1,fullScale:3600,unit:' rpm'},{key:'rpm2',name:'RPM2-OBS',scale:1,fullScale:3600,unit:' rpm'}];
+const cardHtml=([k,n,u])=>`<div class="card"><div class="label">${n}</div><div class="value" id="v-${k}">--<span class="unit">${u}</span></div>${k==='accelMenu'?'<div class="accel-prediction"><span>예측 가속시간</span><strong id="v-predictionAccel">-- s</strong></div><div class="stepper"><button id="accel-dn" disabled>DN −</button><button id="accel-up" disabled>UP +</button></div>':''}</div>`;
+$('cards').innerHTML=`<div class="card-row common">${commonCardDefs.map(cardHtml).join('')}</div><div class="card-row motor"><div class="row-title m1">M1</div>${m1CardDefs.map(cardHtml).join('')}</div><div class="card-row motor"><div class="row-title m2">M2</div>${m2CardDefs.map(cardHtml).join('')}</div>`;
+function parse(line){
+  const p=line.trim().split(',');if(p[0]!=='$VCU')return null;
+  const fields=p.length===28?F:p.length===24?brakeF:p.length===23?currentF:p.length===22?accelF:p.length===21?previousF:p.length===19?legacyF:null;if(!fields)return null;
+  const d={};fields.forEach((k,i)=>d[k]=Number(p[i+1]));
+  if(p.length===19){d.canCmd1=0;d.canCmd2=0}if(p.length<22)d.accelRaw=0;if(p.length<23)d.byte3Raw=0;if(p.length<24)d.embBrake=0;if(p.length<28){d.targetPwm1=d.pwm1;d.targetPwm2=d.pwm2;d.rawRpm1=d.rpm1;d.rawRpm2=d.rpm2}d.source=d.source?'CAN':'GPIO';
+  if([...numeric].some(k=>!Number.isFinite(d[k])))return null; return d;
+}
+function accept(line){
+  line=line.trim();
+  if(line.startsWith('$RESET,')){
+    lastDataAt=Date.now();lastDeviceTime=null;uartStallShown=false;
+    rows.push(line);
+    appendLog(`*** MCU 재시작 감지: ${line} ***`);
+    $('status').textContent=`MCU 재시작 감지 · ${line}`;
+    $('dot').classList.remove('fault');$('dot').classList.add('on');return;
+  }
+  const d=parse(line); if(!d)return;
+  if(lastDeviceTime!==null&&d.time<lastDeviceTime)appendLog(`*** MCU 시간 초기화 감지: ${lastDeviceTime} → ${d.time} ms ***`);
+  lastDeviceTime=d.time;lastDataAt=Date.now();uartStallShown=false;
+  $('dot').classList.remove('fault');$('dot').classList.add('on');
+  startSessionClock();history.push(d); rows.push(line);maxVoltage=Math.max(maxVoltage,d.voltage);maxCurrent=Math.max(maxCurrent,Math.abs(d.current));
+  if(!graphPaused)predictionAccelRaw=null;
+  const accelSec=Math.max(10,Math.min(200,d.accelRaw))/10;
+  d.accelMenu=d.accelRaw*5;d.accelApplied=accelSec;d.predictionAccel=Math.max(10,Math.min(200,predictionAccelRaw??d.accelRaw))/10;
+  cardDefs.forEach(([k,,u])=>{$(`v-${k}`).innerHTML=`${Math.abs(d[k])<10?d[k].toFixed(2):d[k].toFixed(1)}<span class="unit">${u}</span>`});
+  $('v-accelRaw').innerHTML=`${d.accelRaw.toFixed(0)}<span class="unit">raw</span>`;refreshAccelCard();
+  $('power-volt').textContent=`전압 ${d.voltage.toFixed(2)} V · MAX ${maxVoltage.toFixed(2)} V`;$('power-amp').textContent=`전류 ${d.current.toFixed(2)} A · MAX ${maxCurrent.toFixed(2)} A`;$('power-fet').textContent=`FET ${d.fetTemp.toFixed(0)} °C`;$('power-motor').textContent=`Motor ${d.motorTemp.toFixed(0)} °C`;
+  const bits=(v,n)=>((v>>n)&1)?'ON':'OFF';
+  const brake=$('brake-state');brake.textContent=d.embBrake?'DN · 체결':'OFF · 해제';brake.className='brake-badge '+(d.embBrake?'on':'off');
+  const states=[['입력원',d.source],['CAN',d.canReady?'READY':'TIMEOUT'],['ESP32 설정 / 실제 RX',d.accelRaw?(d.accelRaw*5).toFixed(0)+' / '+d.accelRaw.toFixed(0):'--'],['가속시간',d.accelRaw?accelSec.toFixed(1)+' s':'--'],['ADC 1',d.adc1],['ADC 2',d.adc2],['FNR 1',d.fnr1],['FNR 2',d.fnr2],['TOGGLE','0x'+d.toggle.toString(16).padStart(2,'0').toUpperCase()],['BUTTON','0x'+d.button.toString(16).padStart(2,'0').toUpperCase()],['비상',bits(d.button,7)],['오류',d.error||'정상']];
+  $('io').innerHTML=states.map(([k,v])=>`<div class="io-item"><span class="label">${k}</span><strong class="${k==='오류'&&d.error?'bad':'ok'}">${v}</strong></div>`).join('');
+  appendLog(line);if(!graphPaused)drawAll();
+}
+function appendLog(line){const log=$('log');log.textContent=(log.textContent+line+'\n').split('\n').slice(-30).join('\n');log.scrollTop=log.scrollHeight}
+function twoDigits(v){return String(v).padStart(2,'0')}
+function startSessionClock(){
+  if(sessionStartedAt!==null)return;
+  sessionStartedAt=Date.now();
+  const d=new Date(sessionStartedAt);
+  $('started-at').textContent=`${twoDigits(d.getHours())}:${twoDigits(d.getMinutes())}:${twoDigits(d.getSeconds())}`;
+  updateSessionClock();
+}
+function updateSessionClock(){
+  const seconds=sessionStartedAt===null?0:Math.max(0,Math.floor((Date.now()-sessionStartedAt)/1000));
+  const hours=Math.floor(seconds/3600),minutes=Math.floor(seconds%3600/60),secs=seconds%60;
+  $('elapsed').textContent=hours?`${twoDigits(hours)}:${twoDigits(minutes)}:${twoDigits(secs)}`:`${twoDigits(minutes)}:${twoDigits(secs)}`;
+}
+function checkUartHealth(){
+  if(!running||lastDataAt===null)return;
+  const silentMs=Date.now()-lastDataAt;
+  if(silentMs>700&&!uartStallShown){
+    uartStallShown=true;$('dot').classList.remove('on');$('dot').classList.add('fault');
+    $('status').textContent=`UART3 데이터 ${Math.floor(silentMs)} ms 정지 · STM32 HALT/RESET/전원 이상 의심`;
+    rows.push(`$EVENT,${new Date().toISOString()},UART3_DATA_STOPPED,${Math.floor(silentMs)}ms`);
+    appendLog(`*** UART3 DATA STOPPED (${Math.floor(silentMs)} ms): STM32 상태 확인 ***`);
+  }
+}
+function chart(id,series){
+  const c=$(id),r=c.getBoundingClientRect(),dpr=devicePixelRatio||1;c.width=r.width*dpr;c.height=r.height*dpr;const x=c.getContext('2d');x.scale(dpr,dpr);const w=r.width,h=r.height,p=id==='motion'?49:44;
+  x.strokeStyle='#20344e';x.lineWidth=1;for(let i=0;i<5;i++){let y=p+(h-2*p)*i/4;x.beginPath();x.moveTo(p,y);x.lineTo(w-8,y);x.stroke()}
+  const normalized=series.every(s=>s.fullScale);let lo=normalized?-1:0,hi=1;if(!normalized)for(const d of history)for(const s of series){const v=d[s.key]*s.scale;if(v<lo)lo=v;if(v>hi)hi=v}if(lo===hi){lo--;hi++}
+  const n=history.length,plotW=Math.max(1,w-p-8),step=Math.max(1,Math.ceil(n/plotW));
+  const voltage48Mode=n&&history[n-1].voltage>=35;
+  series.forEach((s,si)=>{const value=d=>{if(s.range24){const range=voltage48Mode?s.range48:s.range24;return Math.max(-1,Math.min(1,((d[s.key]-range[0])/(range[1]-range[0]))*2-1))}return(d[s.key]*s.scale)/(s.fullScale||1)};x.strokeStyle=colors[si];x.lineWidth=s.dash?1.3:1.8;x.setLineDash(s.dash||[]);x.beginPath();let drawn=0,last=-1;for(let i=0;i<n;i+=step){const d=history[i],xx=p+i*plotW/Math.max(1,n-1),yy=p+(hi-value(d))*(h-2*p)/(hi-lo);drawn++?x.lineTo(xx,yy):x.moveTo(xx,yy);last=i}if(n&&last!==n-1){const d=history[n-1];x.lineTo(w-8,p+(hi-value(d))*(h-2*p)/(hi-lo))}x.stroke();x.setLineDash([])});
+  if(id==='motion'&&n)drawPredictedPwm(x,w,h,p,plotW,step);
+  if(id==='motion')drawMotionLegend(x,w,voltage48Mode);
+  x.fillStyle='#7890a8';x.fillText(normalized?'+FS':hi.toFixed(1),2,p+4);x.fillText(normalized?'-FS':lo.toFixed(1),2,h-p+4);
+  if(n){const seconds=Math.max(0,(history[n-1].time-history[0].time)/1000);x.fillText('0 s',p,h-7);x.textAlign='right';x.fillText(seconds.toFixed(1)+' s (전체)',w-8,h-7);x.textAlign='left'}
+  if(measureStart!==null&&measureEnd!==null&&n){const xa=p+Math.min(measureStart,measureEnd)*plotW/Math.max(1,n-1),xb=p+Math.max(measureStart,measureEnd)*plotW/Math.max(1,n-1);x.fillStyle='#38d8ff12';x.fillRect(xa,p,xb-xa,h-2*p)}
+  for(const [index,label,color] of [[measureStart,'S','#ffffff'],[measureEnd,'E','#ff647c']])if(index!==null&&index<n){const xx=p+index*plotW/Math.max(1,n-1);x.strokeStyle=color;x.lineWidth=2;x.setLineDash([6,4]);x.beginPath();x.moveTo(xx,p);x.lineTo(xx,h-p);x.stroke();x.setLineDash([]);x.fillStyle=color;x.beginPath();x.moveTo(xx-7,p);x.lineTo(xx+7,p);x.lineTo(xx,p+10);x.closePath();x.fill();x.fillText(label,xx+6,p+14)}
+}
+function drawMotionLegend(x,w,voltage48Mode){
+  const rows=[
+    ['M1','#38d8ff',[['CAN',colors[0]],['PWM-T',colors[2]],['PWM-A',colors[4]],['RPM-RAW',colors[6]],['RPM-OBS',colors[8]],['PRED','#2dd4bf']]],
+    ['M2','#ff647c',[['CAN',colors[1]],['PWM-T',colors[3]],['PWM-A',colors[5]],['RPM-RAW',colors[7]],['RPM-OBS',colors[9]],['PRED','#fbbf24']]]
+  ];
+  x.font='10px system-ui';
+  rows.forEach(([title,titleColor,items],ri)=>{
+    const y=12+ri*17,start=54,slot=Math.max(74,(w-start-10)/6);
+    x.fillStyle=titleColor;x.font='bold 10px system-ui';x.fillText(title,4,y);
+    x.font='10px system-ui';
+    items.forEach(([name,color],i)=>{const xx=start+i*slot;x.strokeStyle=color;x.lineWidth=3;x.beginPath();x.moveTo(xx,y-3);x.lineTo(xx+15,y-3);x.stroke();x.fillStyle=color;x.fillText(name,xx+20,y)});
+  });
+}
+function drawPredictedPwm(x,w,h,p,plotW,step){const n=history.length,channels=[['canCmd1','pwm1','#2dd4bf'],['canCmd2','pwm2','#fbbf24']];channels.forEach(([cmdKey,pwmKey,color])=>{let start=history[0][pwmKey],target=history[0][cmdKey]/1000,t0=history[0].time,lastTarget=target,drawn=0,last=-1;x.strokeStyle=color;x.lineWidth=2;x.setLineDash([3,5]);x.beginPath();for(let i=0;i<n;i++){const d=history[i],newTarget=d[cmdKey]/1000;if(Math.abs(newTarget-lastTarget)>0.001){start=d[pwmKey];target=newTarget;t0=d.time;lastTarget=newTarget}const raw=predictionAccelRaw??d.accelRaw??50,duration=Math.max(10,Math.min(200,raw))*100,phase=Math.max(0,Math.min(1,(d.time-t0)/duration)),smooth=phase*phase*(3-2*phase),pred=start+(target-start)*smooth;if(i%step===0||i===n-1){const xx=p+i*plotW/Math.max(1,n-1),yy=p+(1-pred)*(h-2*p)/2;drawn++?x.lineTo(xx,yy):x.moveTo(xx,yy);last=i}}x.stroke();x.setLineDash([])})}
+function drawPower(){
+  const c=$('power'),r=c.getBoundingClientRect(),dpr=devicePixelRatio||1;c.width=r.width*dpr;c.height=r.height*dpr;const x=c.getContext('2d');x.scale(dpr,dpr);
+  const w=r.width,h=r.height,p=44,n=history.length,plotW=Math.max(1,w-p-8),top=24,bottom=h-24,plotH=bottom-top;
+  const is48=n&&history[n-1].voltage>=35,vMin=is48?40:20,vMax=is48?60:30;
+  const maxCurrent=history.reduce((m,d)=>Math.max(m,Math.abs(d.current)),0),currentFs=[5,10,20,50,100].find(v=>maxCurrent<=v)||100;
+  x.strokeStyle='#20344e';x.lineWidth=1;for(let i=0;i<4;i++){const y=top+plotH*i/3;x.beginPath();x.moveTo(p,y);x.lineTo(w-8,y);x.stroke()}
+  const plot=(color,dash,value)=>{x.strokeStyle=color;x.lineWidth=2;x.setLineDash(dash);x.beginPath();let drawn=0;history.forEach((d,i)=>{const xx=p+i*plotW/Math.max(1,n-1),ratio=Math.max(0,Math.min(1,value(d))),yy=bottom-ratio*plotH;drawn++?x.lineTo(xx,yy):x.moveTo(xx,yy)});x.stroke();x.setLineDash([])};
+  if(n){plot('#ffd166',[8,5],d=>(d.voltage-vMin)/(vMax-vMin));plot('#22d3ee',[],d=>Math.abs(d.current)/currentFs);plot('#f8f9fa',[3,4],d=>d.fetTemp/120);plot('#e879f9',[3,4],d=>d.motorTemp/120)}
+  x.font='11px system-ui';x.fillStyle='#ffd166';x.fillText(`Volt ${vMin}–${vMax}V`,p,13);x.fillStyle='#22d3ee';x.fillText(`Amp 0–${currentFs}A`,p+115,13);x.fillStyle='#f8f9fa';x.fillText('FET 0–120°C',p+215,13);x.fillStyle='#e879f9';x.fillText('Motor 0–120°C',p+315,13);
+  x.fillStyle='#7890a8';x.fillText(`${vMax}V`,2,top+4);x.fillText(`${vMin}V`,2,bottom+4);
+  if(n){const seconds=Math.max(0,(history[n-1].time-history[0].time)/1000);x.fillText('0 s',p,h-5);x.textAlign='right';x.fillText(seconds.toFixed(1)+' s',w-8,h-5);x.textAlign='left'}
+}
+function drawBrake(){const c=$('brake'),r=c.getBoundingClientRect(),dpr=devicePixelRatio||1;c.width=r.width*dpr;c.height=r.height*dpr;const x=c.getContext('2d');x.scale(dpr,dpr);const w=r.width,h=r.height,p=44,n=history.length;x.lineCap='butt';x.strokeStyle='#20344e';x.lineWidth=14;x.beginPath();x.moveTo(p,h/2);x.lineTo(w-8,h/2);x.stroke();if(!n)return;const plotW=Math.max(1,w-p-8),seg=plotW/Math.max(1,n-1);for(let i=0;i<n;i++){x.strokeStyle=history[i].embBrake?'#ff647c':'#62e6a7';x.lineWidth=14;const x1=p+i*seg,x2=i===n-1?w-8:p+(i+1)*seg;x.beginPath();x.moveTo(x1,h/2);x.lineTo(x2,h/2);x.stroke();if(i&&history[i].embBrake!==history[i-1].embBrake){x.strokeStyle='#e8f1fb';x.lineWidth=2;x.beginPath();x.moveTo(x1,h/2-11);x.lineTo(x1,h/2+11);x.stroke()}}x.font='11px system-ui';x.fillStyle='#62e6a7';x.fillText('OFF',p,11);x.fillStyle='#ff647c';x.textAlign='right';x.fillText('DN',w-8,11);x.textAlign='left'}
+function drawAll(){chart('motion',motionSeries);drawPower();drawBrake()}
+function deltaTooltipHtml(){if(measureStart===null||measureEnd===null||!history.length)return '';const s=history[measureStart],e=history[measureEnd],dt=(e.time-s.time)/1000;if(dt<=0)return '';const line=(n,ck,pk)=>{const cs=s[ck]/10,ce=e[ck]/10,ps=s[pk]*100,pe=e[pk]*100,dc=ce-cs,dp=pe-ps,gain=Math.abs(dc)>0.001?dp/dc*100:0;return `<b>${n}</b><br>CAN ${cs.toFixed(1)}→${ce.toFixed(1)}%, Δ${dc.toFixed(1)}%, ${ (dc/dt).toFixed(2)}%/s<br>PWM ${ps.toFixed(1)}→${pe.toFixed(1)}%, Δ${dp.toFixed(1)}%, ${(dp/dt).toFixed(2)}%/s · 추종 ${gain.toFixed(1)}%`};return `<div style="border-top:1px solid #42617d;margin-top:6px;padding-top:6px"><b style="color:#38d8ff">Δ S→E</b> · S ${(s.time/1000).toFixed(3)}s · E ${(e.time/1000).toFixed(3)}s · Δt ${dt.toFixed(3)}s<br>${line('Motor 1','canCmd1','pwm1')}<br>${line('Motor 2','canCmd2','pwm2')}</div>`}
+function enableTooltip(id,series){const c=$(id),tip=$(id+'-tip');c.addEventListener('mousemove',e=>{if(!history.length)return;const r=c.getBoundingClientRect(),p=id==='motion'?49:44,ratio=Math.max(0,Math.min(1,(e.clientX-r.left-p)/Math.max(1,r.width-p-8))),i=Math.round(ratio*(history.length-1)),d=history[i];tip.innerHTML=`<b>${(d.time/1000).toFixed(1)} s</b><br>`+series.map((s,j)=>`<span style="color:${colors[j]}">●</span> ${s.name}: ${(d[s.key]*s.scale).toFixed(s.key.startsWith('pwm')?1:2)}${s.unit||''}`).join('<br>')+`<br><b style="color:${d.embBrake?'#ff647c':'#62e6a7'}">전자브레이크: ${d.embBrake?'DN · 체결':'OFF · 해제'}</b>`+deltaTooltipHtml();tip.style.display='block';tip.style.left=Math.max(5,Math.min(r.width-tip.offsetWidth-8,e.clientX-r.left+12))+'px';tip.style.top=Math.max(30,e.clientY-r.top-tip.offsetHeight-8)+'px'});c.addEventListener('mouseleave',()=>tip.style.display='none')}
+function enablePowerTooltip(){const c=$('power'),tip=$('power-tip');c.addEventListener('mousemove',e=>{if(!history.length)return;const r=c.getBoundingClientRect(),ratio=Math.max(0,Math.min(1,(e.clientX-r.left-44)/Math.max(1,r.width-52))),d=history[Math.round(ratio*(history.length-1))];tip.innerHTML=`<b>${(d.time/1000).toFixed(2)} s</b><br><span style="color:#ffd166">●</span> 전압: ${d.voltage.toFixed(2)} V<br><span style="color:#22d3ee">●</span> 전류: ${d.current.toFixed(2)} A<br><span style="color:#f8f9fa">●</span> FET 온도: ${d.fetTemp.toFixed(0)} °C<br><span style="color:#e879f9">●</span> 모터 온도: ${d.motorTemp.toFixed(0)} °C`;tip.style.display='block';tip.style.left=Math.max(5,Math.min(r.width-tip.offsetWidth-8,e.clientX-r.left+12))+'px';tip.style.top=Math.max(25,e.clientY-r.top-tip.offsetHeight-8)+'px'});c.addEventListener('mouseleave',()=>tip.style.display='none')}
+function measurementResult(){if(measureStart===null||measureEnd===null){$('measure').textContent='그래프를 일시정지하면 시작선(S)과 끝선(E)이 나타납니다.';return}let a=measureStart,b=measureEnd;if(a>b)[a,b]=[b,a];const s=history[a],e=history[b],dt=(e.time-s.time)/1000,slope=v=>dt>0?v/dt:0,row=(n,ck,pk)=>{const cs=s[ck]/10,ce=e[ck]/10,ps=s[pk]*100,pe=e[pk]*100,dc=ce-cs,dp=pe-ps,gain=Math.abs(dc)>0.001?dp/dc*100:0;return `<tr><td>${n}</td><td>${cs.toFixed(1)} → ${ce.toFixed(1)} (${dc>=0?'+':''}${dc.toFixed(1)})</td><td>${slope(dc).toFixed(2)}</td><td>${ps.toFixed(1)} → ${pe.toFixed(1)} (${dp>=0?'+':''}${dp.toFixed(1)})</td><td>${slope(dp).toFixed(2)}</td><td>${gain.toFixed(1)}%</td></tr>`};$('measure').innerHTML=`<b>구간 측정</b> · 시작 ${(s.time/1000).toFixed(3)} s · 끝 ${(e.time/1000).toFixed(3)} s · 경과 <b>${dt.toFixed(3)} s</b><table><tr><th>채널</th><th>CAN 명령 % (변화량)</th><th>CAN 기울기 %/s</th><th>PWM % (변화량)</th><th>PWM 기울기 %/s</th><th>추종비</th></tr>${row('Motor 1','canCmd1','pwm1')}${row('Motor 2','canCmd2','pwm2')}</table><span class="label">일시정지 상태에서 S 또는 E 기준선을 좌우로 드래그하세요.</span>`}
+function pointIndex(c,clientX){const r=c.getBoundingClientRect(),p=49,ratio=Math.max(0,Math.min(1,(clientX-r.left-p)/Math.max(1,r.width-p-8)));return Math.round(ratio*(history.length-1))}
+function enableMeasurement(){const c=$('motion');c.addEventListener('pointerdown',e=>{if(!graphPaused||!history.length||measureStart===null||measureEnd===null)return;const i=pointIndex(c,e.clientX);dragHandle=Math.abs(i-measureStart)<=Math.abs(i-measureEnd)?'start':'end';c.setPointerCapture(e.pointerId);c.style.cursor='ew-resize';e.preventDefault()});c.addEventListener('pointermove',e=>{if(dragHandle===null)return;const i=pointIndex(c,e.clientX);if(dragHandle==='start')measureStart=Math.min(i,measureEnd);else measureEnd=Math.max(i,measureStart);measurementResult();drawAll()});const stop=e=>{if(dragHandle!==null){dragHandle=null;c.style.cursor=graphPaused?'ew-resize':'crosshair';if(c.hasPointerCapture(e.pointerId))c.releasePointerCapture(e.pointerId)}};c.addEventListener('pointerup',stop);c.addEventListener('pointercancel',stop)}
+async function connect(){
+  if(!('serial'in navigator)){alert('Web Serial을 지원하는 Chrome 또는 Edge에서 여세요.');return}
+  try{port=await navigator.serial.requestPort();await port.open({baudRate:115200,dataBits:8,stopBits:1,parity:'none',flowControl:'none'});running=true;lastDataAt=Date.now();uartStallShown=false;$('dot').classList.remove('fault');$('dot').classList.add('on');$('connect').disabled=true;$('status').textContent='UART3 연결됨 · 115200 baud';readLoop()}catch(e){$('status').textContent='연결 실패: '+e.message}
+}
+async function readLoop(){
+  const decoder=new TextDecoder();
+  try{while(port&&port.readable&&running){reader=port.readable.getReader();try{while(running){const {value,done}=await reader.read();if(done)break;partial+=decoder.decode(value,{stream:true});const lines=partial.split(/\r?\n/);partial=lines.pop();lines.forEach(accept)}}finally{reader.releaseLock();reader=null}}}catch(e){$('status').textContent='수신 오류: '+e.message}finally{$('dot').classList.remove('on');$('connect').disabled=false}
+}
+function demo(){if(demoTimer){clearInterval(demoTimer);demoTimer=null;$('demo').textContent='데모 실행';return}let t=0;$('demo').textContent='데모 정지';demoTimer=setInterval(()=>{t+=100;let a=t/1800,cmd1=Math.round(700*Math.sin(a)),cmd2=Math.round(650*Math.cos(a));accept(`$VCU,${t},${t%8000<4000?1:0},1,${1900+Math.round(500*Math.sin(a))},${2000+Math.round(450*Math.cos(a))},1,2,1,0,50,24,${cmd1},${cmd2},${(cmd1/1000).toFixed(3)},${(cmd2/1000).toFixed(3)},${Math.round(2100*Math.sin(a))},${Math.round(1900*Math.cos(a))},${35+Math.round(7*Math.sin(a/5))},${32+Math.round(5*Math.cos(a/6))},${(25.4+.7*Math.sin(a/4)).toFixed(2)},${(8+6*Math.abs(Math.sin(a))).toFixed(2)},0`)},100)}
+function refreshAccelCard(){if(!history.length)return;const received=history[history.length-1].accelRaw,raw=predictionAccelRaw??received,sec=Math.max(10,Math.min(200,raw))/10;$('v-predictionAccel').innerHTML=`${sec.toFixed(1)}<span class="unit">s (${raw.toFixed(0)} raw)</span>`}
+function adjustPrediction(delta){if(!graphPaused||!history.length)return;if(predictionAccelRaw===null)predictionAccelRaw=history[history.length-1].accelRaw;predictionAccelRaw=Math.max(0,Math.min(255,predictionAccelRaw+delta));refreshAccelCard();drawAll()}
+$('connect').onclick=connect;$('demo').onclick=demo;
+$('accel-dn').onclick=()=>adjustPrediction(-1);$('accel-up').onclick=()=>adjustPrediction(1);
+$('pause').onclick=()=>{graphPaused=!graphPaused;$('pause').textContent=graphPaused?'그래프 다시 시작':'그래프 일시정지';$('pause').classList.toggle('primary',graphPaused);$('motion').style.cursor=graphPaused?'ew-resize':'crosshair';$('accel-dn').disabled=!graphPaused;$('accel-up').disabled=!graphPaused;if(graphPaused&&history.length){predictionAccelRaw=history[history.length-1].accelRaw;measureStart=Math.round((history.length-1)*0.25);measureEnd=Math.round((history.length-1)*0.75);measurementResult()}if(!graphPaused){dragHandle=null;predictionAccelRaw=null}refreshAccelCard();drawAll()};
+$('clear').onclick=()=>{history.length=rows.length=0;measureStart=measureEnd=null;sessionStartedAt=null;maxVoltage=maxCurrent=0;$('started-at').textContent='--:--:--';$('power-volt').textContent='전압 -- V · MAX -- V';$('power-amp').textContent='전류 -- A · MAX -- A';$('power-fet').textContent='FET -- °C';$('power-motor').textContent='Motor -- °C';updateSessionClock();$('log').textContent='';measurementResult();drawAll()};
+$('save').onclick=()=>{const header='$VCU,'+F.join(',');const blob=new Blob([[header,...rows].join('\r\n')],{type:'text/csv'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`ydriver-${new Date().toISOString().replace(/[:.]/g,'-')}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};
+enableTooltip('motion',motionSeries);enablePowerTooltip();enableMeasurement();setInterval(()=>{updateSessionClock();checkUartHealth()},250);addEventListener('resize',drawAll);drawAll();
+</script>
+</body>
+</html>

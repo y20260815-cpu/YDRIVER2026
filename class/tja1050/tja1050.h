@@ -11,7 +11,22 @@
 #define xCAN20B
 
 #define RX_CANID 0x07B0
-#define CAN_ALIVE_TIMEOUT 10
+/*
+ * Drive command is normally transmitted every 100 ms.  The receiver timeout
+ * must be longer than one nominal transmit period; otherwise the 10 ms task
+ * can expire the counter just before the next frame and briefly report CAN
+ * loss.  That false edge also makes the FND CAN-alive dot stay off and can
+ * stop/restart the motor.  30 ticks gives a 300 ms missing-frame timeout.
+ */
+#define CAN_ALIVE_TIMEOUT 30U
+
+/* Common AS/FM drive protocol (11-bit standard CAN, 500 kbit/s). */
+#define CAN_ID_AS_DRIVE   0x701U
+#define CAN_ID_FM_DRIVE   0x702U
+#define CAN_ID_ESTOP      0x703U
+#define CAN_DRIVE_DLC     8U
+#define CAN_ESTOP_DLC     1U
+#define CAN_ESTOP_VALUE   0xFFU
 
 //typedef struct tag_cctrlBit
 //{
@@ -78,6 +93,7 @@ class tja1050
 {
 private:
 	//uint32_t  id_change(uint32_t src);
+	void CAN_Request_EVT(uint8_t *req);
 	void CAN_Request_SAVE(uint32_t id, uint8_t *req);
 public:
 	tja1050();
@@ -99,8 +115,10 @@ public:
 	uint8_t can_tx[8];
 //	RX_CAN_DATA mc1_can_rx_data;
 //	RX_CAN_DATA mc2_can_rx_data;
-	uint8_t can_exist=0;
-	uint8_t can_TimeOut=0;
+	/* 0=drive frame never received, 1=receiving, 2=timed out. */
+	volatile uint8_t can_exist=0;
+	/* Written by the CAN RX interrupt and consumed by the 10 ms control task. */
+	volatile uint8_t can_TimeOut=0;
 	VOLT_MAIN volt_main;
 	SOC_TABLE soc;
 

@@ -39,13 +39,12 @@ void tja1050::can_start()
   sFilterConfig.FilterBank = 0;
   sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;
   sFilterConfig.FilterScale = CAN_FILTERSCALE_16BIT;
-  sFilterConfig.FilterIdHigh =filter_id;//FilterIdHigh; // STID[10:0] & EXTID[17:13]
-  //sFilterConfig.FilterIdHigh =FilterIdHigh; // STID[10:0] & EXTID[17:13]
-  sFilterConfig.FilterIdLow = 0;//FilterIdLow; // EXID[12:5] & 3 Reserved bits
-  sFilterConfig.FilterMaskIdHigh =0x7F0<<5;//FilterMaskIdHigh;
-  sFilterConfig.FilterMaskIdLow =0x7F0<<5;//0;//FilterMaskIdLow;
-  //sFilterConfig.FilterMaskIdHigh =0;//FilterMaskIdHigh;
-  //sFilterConfig.FilterMaskIdLow =0;//0;//FilterMaskIdLow;
+  // Filter 1: 0x700-0x70F (AS/FM common command and setup/config).
+  // Filter 2: 0x7C0-0x7CF (legacy bangJaeCha EVT).
+  sFilterConfig.FilterIdHigh = filter_id;
+  sFilterConfig.FilterIdLow = 0x7C0<<5;
+  sFilterConfig.FilterMaskIdHigh = 0x7F0<<5;
+  sFilterConfig.FilterMaskIdLow = 0x7F0<<5;
   sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0;
   sFilterConfig.FilterActivation = ENABLE;
   sFilterConfig.SlaveStartFilterBank = 14;
@@ -109,6 +108,21 @@ void tja1050::CAN_Request_Setup_Data()
 	printf("SYSTEM_CONF setup response ignored\r\n");
 }
 
+
+void tja1050::CAN_Request_EVT(uint8_t *req)
+{
+	pDataClass->vcu_sdu.LeftMotor_velocity = BUILD_UINT16(req[1], req[0]);
+	// Preserve the existing AS menu representation for legacy diagnostics:
+	// menu 50/100/150/200 is transmitted as raw 10/20/30/40.
+	pDataClass->vcu_sdu.canBrakeDelay=req[2] * CAN_ACCEL_LEGACY_MENU_SCALE;
+	pDataClass->vcu_sdu.canBattery=req[3];
+	pDataClass->can_byte2_raw=req[2];
+	pDataClass->can_byte3_raw=req[3];
+	pDataClass->vcu_sdu.RightMotor_velocity= BUILD_UINT16(req[5], req[4]);
+	pDataClass->vcu_sdu.toggle.u8=req[6];
+	pDataClass->vcu_sdu.btn.u8   =req[7];
+	can_process_flag=1;
+}
 
 void tja1050::canSetConfig(){
 #if 0
@@ -206,7 +220,6 @@ void tja1050::HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *CanHandle)
   //printf("StdID: %04lx, IDE: %ld, DLC: %ld\r\n", RxHeader.StdId, RxHeader.IDE, RxHeader.DLC);
  // printf("StdID[%04lx] [%d %d %d %d %d %d %d %d]\r\n",RxHeader.StdId, RxData[0], RxData[1], RxData[2], RxData[3], RxData[4], RxData[5], RxData[6], RxData[7]);
  // pDataClass->sysFlag.canReady=CAN_ALIVE_TIMEOUT;
-  can_TimeOut=CAN_ALIVE_TIMEOUT;
   if(RxHeader.StdId>=0x708 && RxHeader.StdId<=0x70C){
 	  CAN_Request_SAVE(RxHeader.StdId, RxData);
   }
@@ -215,5 +228,41 @@ void tja1050::HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *CanHandle)
 	  canFlag.needRxConfigData=0;
 	  if(pDataClass != 0) pDataClass->sysFlag.savedConfigOK=0;
 	  printf("SYSTEM_CONF request ignored\r\n");
+  }
+
+  else if(RxHeader.StdId==CAN_ID_AS_DRIVE){
+	  if(RxHeader.DLC != CAN_DRIVE_DLC) return;
+	  can_TimeOut=CAN_ALIVE_TIMEOUT;
+	  can_exist=1;
+	  pDataClass->system_start_flag=1;
+	  if(!as_can_mode) systemControlType=SAMBOO_LIFT;
+	  CAN_Request_EVT(RxData);
+  }
+  else if(RxHeader.StdId==CAN_ID_FM_DRIVE){
+	  // The AS hardware selection owns the motor command path.  Ignoring FM
+	  // drive frames here prevents two controllers from commanding the motors.
+	  if(as_can_mode || RxHeader.DLC != CAN_DRIVE_DLC) return;
+	  can_TimeOut=CAN_ALIVE_TIMEOUT;
+	  can_exist=1;
+	  pDataClass->system_start_flag=1;
+	  systemControlType=FM_CONTROL;
+	  CAN_Request_EVT(RxData);
+  }
+  else if(RxHeader.StdId==CAN_ID_ESTOP){
+	  // E-STOP is common and has priority in every operating mode.
+	  if(RxHeader.DLC == CAN_ESTOP_DLC && RxData[0] == CAN_ESTOP_VALUE) {
+		  pDataClass->HOLD_Emergency = 1;
+	  }
+  }
+  else if(RxHeader.StdId==0x7C1)//bangJaeCha
+  {
+	  // AS mode is jumper-fixed; do not let bus traffic switch the profile.
+	  if(as_can_mode) return;
+	  if(RxHeader.DLC != CAN_DRIVE_DLC) return;
+	  can_TimeOut=CAN_ALIVE_TIMEOUT;
+	  can_exist=1;
+	  pDataClass->system_start_flag=1;
+	  systemControlType=SAMBOO_BANGJAE;
+	  CAN_Request_EVT(RxData);
   }
 }

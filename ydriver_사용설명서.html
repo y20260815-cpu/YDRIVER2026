@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2026ydriver 사용설명서</title>
+<style>
+  :root {
+    --main: #1a5276; --accent: #2e86c1; --warn: #c0392b; --ok: #1e8449;
+    --bg: #f8f9fa; --border: #d5d8dc;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { font-family: 'Malgun Gothic','맑은 고딕',sans-serif; margin: 0; color: #212f3c; background: #fff; line-height: 1.6; }
+  /* 고정 사이드바 목차 */
+  nav.sidebar { position: fixed; top: 0; left: 0; width: 230px; height: 100vh;
+    overflow-y: auto; background: #f4f6f7; border-right: 1px solid var(--border); padding: 18px 14px; }
+  nav.sidebar h2 { margin: 0 0 10px 0; font-size: 16px; color: var(--main); border: none; padding: 0; }
+  nav.sidebar ol { margin: 0; padding-left: 22px; }
+  nav.sidebar li { margin: 6px 0; font-size: 13.5px; }
+  nav.sidebar a { color: var(--accent); text-decoration: none; }
+  nav.sidebar a:hover { text-decoration: underline; color: var(--main); }
+  header, .container, footer { margin-left: 230px; }
+  .container { max-width: 1000px; padding: 24px; }
+  @media (max-width: 900px) {
+    nav.sidebar { position: static; width: auto; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+    header, .container, footer { margin-left: 0; }
+  }
+  header { background: var(--main); color: #fff; padding: 28px 24px; }
+  header h1 { margin: 0 0 6px 0; font-size: 26px; }
+  header p { margin: 0; opacity: .85; }
+  h2 { color: var(--main); border-bottom: 3px solid var(--accent); padding-bottom: 6px; margin-top: 40px; }
+  h3 { color: var(--accent); margin-top: 28px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0 20px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: #eaf2f8; color: var(--main); }
+  tr:nth-child(even) td { background: var(--bg); }
+  code { background: #eef; padding: 1px 5px; border-radius: 3px; font-family: Consolas, monospace; font-size: 13px; }
+  .warn { background: #fdedec; border-left: 5px solid var(--warn); padding: 10px 14px; margin: 14px 0; }
+  .note { background: #eafaf1; border-left: 5px solid var(--ok); padding: 10px 14px; margin: 14px 0; }
+  .info { background: #ebf5fb; border-left: 5px solid var(--accent); padding: 10px 14px; margin: 14px 0; }
+  footer { margin-top: 48px; padding: 16px 24px; background: var(--bg); border-top: 1px solid var(--border); font-size: 13px; color: #666; }
+</style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <h2>목차</h2>
+  <ol>
+    <li><a href="#overview">시스템 개요</a></li>
+    <li><a href="#hw">하드웨어 구성</a></li>
+    <li><a href="#con1">U1_CON1 / AS 점퍼</a></li>
+    <li><a href="#modes">동작 모드</a></li>
+    <li><a href="#power">전원 투입 시퀀스</a></li>
+    <li><a href="#can">CAN 통신 사양</a></li>
+    <li><a href="#protocol">CAN 프로토콜</a></li>
+    <li><a href="#motor">모터 명령 처리</a></li>
+    <li><a href="#protect">보호 기능</a></li>
+    <li><a href="#fnd">FND / 에러코드</a></li>
+    <li><a href="#uart">UART 로그</a></li>
+    <li><a href="#trouble">트러블슈팅</a></li>
+  </ol>
+</nav>
+
+<header>
+  <h1>2026ydriver 사용설명서</h1>
+  <p>STM32F103 기반 듀얼 DC 모터 드라이버 (리프트 / 방제차 / AS(아성) 공용) &mdash; 2026-09-05</p>
+</header>
+
+<div class="container">
+
+<h2 id="overview">1. 시스템 개요</h2>
+<p>2026ydriver는 STM32F103Rx(LQFP64) 기반의 듀얼 DC 모터 드라이버입니다.
+로컬 입력(FNR 레버 + 스로틀)과 CAN 원격 명령을 모두 지원하며, 하나의 펌웨어로
+<strong>리프트(삼부)</strong>, <strong>방제차(삼부)</strong>, <strong>AS(아성 ESP32 인터페이스)</strong> 3종의
+상위 컨트롤러와 호환됩니다.</p>
+<table>
+  <tr><th>항목</th><th>내용</th></tr>
+  <tr><td>MCU</td><td>STM32F103RBT6 / RCT6 (LQFP64), 내부 RC(HSI) 기반 36MHz</td></tr>
+  <tr><td>모터 출력</td><td>2채널 H-브리지 PWM (TIM2/TIM3), BEMF 기반 RPM 추정 + PID</td></tr>
+  <tr><td>배터리</td><td>24V / 48V 자동 감지 (DC-Link 전압 기반, 보호 임계값 자동 설정)</td></tr>
+  <tr><td>CAN</td><td>500 kbps, 트랜시버 SN65HVD232(3.3V)</td></tr>
+  <tr><td>표시</td><td>1자리 FND (74HC595 구동, 에러코드/FNR 상태)</td></tr>
+  <tr><td>워치독</td><td>IWDG 약 12.8초</td></tr>
+</table>
+
+<h2 id="hw">2. 하드웨어 구성</h2>
+
+<h3>2.1 릴레이 맵</h3>
+<table>
+  <tr><th>릴레이</th><th>MCU 핀</th><th>기능</th></tr>
+  <tr><td>pRY1 (MC1)</td><td>PD2</td><td><strong>DC-Link 메인 릴레이</strong></td></tr>
+  <tr><td>pRY2 (MC2)</td><td>PB4</td><td><strong>DC-Link 프리차지 릴레이</strong></td></tr>
+  <tr><td>pRY3</td><td>PB5</td><td>EMB(전자 브레이크) 전원</td></tr>
+  <tr><td>pRY4</td><td>PB6</td><td>리프트 M / 방제차 스프레이</td></tr>
+  <tr><td>pRY5</td><td>PB7</td><td>SV1 밸브</td></tr>
+  <tr><td>pRY6</td><td>PB8</td><td>SV2 밸브</td></tr>
+  <tr><td>pRY7</td><td>PB9</td><td>상태 LED</td></tr>
+  <tr><td>pWUP / pWDN</td><td>PB0 / PB1</td><td>CSV1 / CSV2 (캐스트 밸브)</td></tr>
+</table>
+<div class="warn"><strong>주의:</strong> 릴레이 드라이버 ULN2003의 <strong>COM(9번 핀)이 릴레이 코일 전원(+)에 연결</strong>되어 있어야 합니다.
+미연결 시 코일 플라이백 서지로 드라이버 채널 및 MCU 핀이 반복 소손될 수 있습니다.</div>
+
+<h3>2.2 주요 신호 핀</h3>
+<table>
+  <tr><th>기능</th><th>핀</th><th>비고</th></tr>
+  <tr><td>CAN TX / RX</td><td>PA12 / PA11</td><td>SN65HVD232 D(1) / R(4)</td></tr>
+  <tr><td>UART1 (로그)</td><td>PA9(TX) / PA10(RX)</td><td>115200 8N1, CON1 1·2번</td></tr>
+  <tr><td>FNR1 입력</td><td>PB13(AP) / PB14(AN)</td><td>1=전진, 2=후진, 0·3=중립</td></tr>
+  <tr><td>FNR2 입력</td><td>PC13(BP) / PC12(BN)</td><td>〃</td></tr>
+  <tr><td>브리지 SD</td><td>PB2</td><td>Low=FET 전체 차단</td></tr>
+  <tr><td>FND</td><td>PC0(SDAT)/PC1(SCLK)/PC2(LATCH)</td><td>74HC595</td></tr>
+  <tr><td>AS 모드 스트랩</td><td>PA8</td><td>CON1 5번, 3.5절 참조</td></tr>
+</table>
+
+<h2 id="con1">3. U1_CON1 커넥터 / AS 모드 점퍼</h2>
+<table>
+  <tr><th>CON1 핀</th><th>연결</th><th>용도</th></tr>
+  <tr><td>1</td><td>U1RX (PA10)</td><td rowspan="3">데이터 수집용 UART (115200 bps 로그 출력)</td></tr>
+  <tr><td>2</td><td>U1TX (PA9)</td></tr>
+  <tr><td>3</td><td>GND</td></tr>
+  <tr><td>4</td><td>+3.3V</td><td rowspan="2"><strong>4-5 점퍼 단락 = AS(아성) 모드 고정</strong></td></tr>
+  <tr><td>5</td><td>PA8</td></tr>
+</table>
+<div class="info">
+<strong>AS 모드 점퍼 동작:</strong> 부팅 시 PA8을 풀다운 입력으로 판독합니다.
+4-5번이 점퍼로 단락되어 있으면 PA8=High가 되어 <code>AS-CAN 모드</code>로 고정 진입하며,
+UART에 <code>### AS-CAN MODE (CON1 4-5 jumper detected) ###</code>가 출력됩니다.
+점퍼가 없으면 기존 자동 구분 모드로 동작합니다.
+</div>
+
+<h2 id="modes">4. 동작 모드</h2>
+<table>
+  <tr><th>모드</th><th>진입 조건</th><th>모터 명령 소스</th><th>부가 GPIO</th><th>CAN 두절 시</th></tr>
+  <tr><td>로컬</td><td>CAN 미수신 (기본)</td><td>FNR 레버 + 스로틀 ADC</td><td>리프트 GPIO</td><td>-</td></tr>
+  <tr><td>리프트 (CAN)</td><td>0x701 수신</td><td>CAN 속도 명령</td><td>리프트/캐스트 밸브</td><td>약 300ms 후 로컬 복귀</td></tr>
+  <tr><td>방제차 (CAN)</td><td>0x7C1 수신</td><td>CAN 속도 명령</td><td>스프레이(pRY4)</td><td>약 300ms 후 로컬 복귀, 스프레이 OFF</td></tr>
+  <tr><td><strong>AS (아성)</strong></td><td><strong>CON1 4-5 점퍼</strong></td><td>CAN 속도 명령 (0x701)</td><td>리프트 GPIO</td><td><strong>정지 유지 (로컬 폴백 금지)</strong>, 0x7C1 무시</td></tr>
+</table>
+<div class="note">CAN 수신 중에는 로컬 FNR 레버 입력이 무시되며, CAN이 <strong>300ms(30틱)</strong> 이상 끊기면
+일반 모드는 로컬 입력으로 자동 복귀합니다. 전환 시 마지막 CAN 버튼/토글 상태(스프레이 등)는 자동 클리어됩니다.</div>
+
+<h2 id="power">5. 전원 투입 시퀀스 (DC-Link)</h2>
+<ol>
+  <li>부팅 → 전체 릴레이 OFF, AS 점퍼 판독</li>
+  <li><strong>MC2(프리차지) ON</strong> → 1초 대기 (DC-Link 커패시터 충전)</li>
+  <li><strong>MC1(메인) ON</strong> → 0.5초 대기 (스위칭 과도 안정화)</li>
+  <li>DC-Link 전압 측정 → 24V/48V 모드 자동 감지, 보호 임계값 설정</li>
+  <li>션트 과전류 보호(ADC2 아날로그 워치독) 활성화</li>
+  <li>SD(브리지 인에이블) High → 구동 준비 완료, FND에 0 표시</li>
+</ol>
+<p>전원 차단(<code>power_off</code>) 시에는 SD 차단 → MC1·MC2 동시 개방 → 0.5초 후 전체 릴레이 OFF 순서입니다.</p>
+
+<h2 id="can">6. CAN 통신 사양</h2>
+<table>
+  <tr><th>항목</th><th>값</th><th>비고</th></tr>
+  <tr><td>비트레이트</td><td><strong>500 kbps</strong></td><td>36MHz ÷ 4 ÷ 18TQ</td></tr>
+  <tr><td>비트 타이밍</td><td>BS1=13TQ, BS2=4TQ, SJW=4TQ</td><td>샘플포인트 77.8%. HSI(내부 RC) 클럭 사용에 대비해 허용 오차 확대(~1.1%)</td></tr>
+  <tr><td>수신 필터</td><td>0x700~0x70F, 0x7C0~0x7CF</td><td>16비트 ID/마스크 2조</td></tr>
+  <tr><td>수신 타임아웃</td><td>300 ms (10ms 틱 × 30)</td><td><code>CAN_ALIVE_TIMEOUT</code></td></tr>
+  <tr><td>트랜시버</td><td>SN65HVD232 (3.3V)</td><td>D=1번, R=4번, 8번 핀 NC</td></tr>
+  <tr><td>종단저항</td><td>120Ω 온보드</td><td>R155</td></tr>
+</table>
+
+<h2 id="protocol">7. CAN 프로토콜</h2>
+
+<h3>7.0 수신 프레임 종류 (마스터 → ydriver)</h3>
+<table>
+  <tr><th>CAN ID</th><th>이름</th><th>송신 주체</th><th>처리</th></tr>
+  <tr><td><strong>0x701</strong></td><td>주행 명령 (EVT)</td><td>리프트 VCU / 아성 ESP32</td><td>모터 명령 큐 투입, 타입=리프트 (AS 모드에서는 AS 유지)</td></tr>
+  <tr><td><strong>0x7C1</strong></td><td>주행 명령 (EVT)</td><td>방제차 VCU</td><td>동일 처리, 타입=방제차 (<strong>AS 모드에서는 무시</strong>)</td></tr>
+  <tr><td>0x700</td><td>설정 읽기 요청</td><td>설정 툴</td><td>미지원 (무시 로그)</td></tr>
+  <tr><td>0x708~0x70C</td><td>설정 저장</td><td>설정 툴</td><td>미지원 (무시 로그)</td></tr>
+</table>
+<div class="note">유효 프레임 수신 시마다 alive 타이머가 갱신되며, <strong>300ms 무수신 시 CAN 모드 해제</strong>
+(일반 모드: 로컬 입력 복귀 / AS 모드: 정지 유지)됩니다.</div>
+
+<h3>7.1 수신: 주행 명령 (0x701 리프트·AS / 0x7C1 방제차, DLC=8)</h3>
+<table>
+  <tr><th>바이트</th><th>필드</th><th>형식</th><th>범위/단위</th><th>드라이버 내 사용</th></tr>
+  <tr><td>0~1</td><td>좌측 모터 속도</td><td>int16 ([0]=상위)</td><td>-1000 ~ +1000</td><td>÷1000 → PWM -100% ~ +100%</td></tr>
+  <tr><td>2</td><td><strong>가속시간</strong></td><td>uint8</td><td>수신값 × 5 = 기준치 (현재 300)</td><td>가속 램프 계수. 300 = 최적 기준, 값이 클수록 완만한 출발 (∝ 1/값, 50 미만 시 기본값)</td></tr>
+  <tr><td>3</td><td><strong>감속시간</strong></td><td>uint8</td><td>현재 24</td><td>감속 램프 계수. 24 = 최적 기준, 값이 클수록 완만한 정지 (∝ 1/값, 4 미만 시 기본값)</td></tr>
+  <tr><td>4~5</td><td>우측 모터 속도</td><td>int16 ([4]=상위)</td><td>-1000 ~ +1000</td><td>÷1000 → PWM</td></tr>
+  <tr><td>6</td><td>토글 (MY_TOGGLE)</td><td>비트필드</td><td>7.1.1 참조</td><td><code>inputRaw.io.toggle</code></td></tr>
+  <tr><td>7</td><td>버튼 (MY_BUTTON)</td><td>비트필드</td><td>7.1.2 참조</td><td><code>inputRaw.io.btn</code></td></tr>
+</table>
+
+<h3>7.1.1 바이트 6 — MY_TOGGLE 비트 정의</h3>
+<table>
+  <tr><th>비트</th><th>필드</th><th>의미</th></tr>
+  <tr><td>0~1</td><td><code>jenhujin</code></td><td>전후진 키 (0=중립)</td></tr>
+  <tr><td>2~3</td><td><code>t_sw</code></td><td>좌우 정지 스위치 (stop_lr, 3=해제)</td></tr>
+  <tr><td>4~5</td><td><code>toggle_3</code></td><td>예비 토글</td></tr>
+  <tr><td>6</td><td><code>spray1</code></td><td><strong>스프레이 1</strong> — 방제차 모드(ioMsg=2)에서 pRY4 구동</td></tr>
+  <tr><td>7</td><td><code>spray2</code></td><td>스프레이 2 (예비)</td></tr>
+</table>
+
+<h3>7.1.2 바이트 7 — MY_BUTTON 비트 정의</h3>
+<table>
+  <tr><th>비트</th><th>필드</th><th>의미</th></tr>
+  <tr><td>0~1</td><td><code>ioMsg</code></td><td><strong>부가장치 프로파일</strong>: 0=리프트/캐스트 GPIO, 2=방제 스프레이</td></tr>
+  <tr><td>2~3</td><td><code>lift_Xud</code></td><td>리프트 상승/하강 (1=UP, 2=DN)</td></tr>
+  <tr><td>4~5</td><td><code>castUPDN</code></td><td>캐스트 상승/하강 (1=UP, 2=DN)</td></tr>
+  <tr><td>6</td><td><code>disablePID</code></td><td>PID 비활성 (현재 미사용)</td></tr>
+  <tr><td>7</td><td><code>emergency</code></td><td><strong>비상정지</strong> — 1 수신 시 즉시 <code>power_off</code> (전 릴레이 개방)</td></tr>
+</table>
+
+<h3>7.1.3 수신 후 데이터 흐름</h3>
+<pre style="background:#f8f9fa;border:1px solid #d5d8dc;border-radius:6px;padding:12px 16px;font-size:13px;line-height:1.5;">
+0x701/0x7C1 수신(IRQ) → vcu_sdu 저장 + can_process_flag
+  → 메인루프 can_process_routine()
+      ├ 속도      → 명령 FIFO (50ms 소비, 램프/제동 공통 처리)
+      ├ toggle/btn → inputRaw.io (리프트/스프레이 GPIO 제어)
+      ├ emergency → HOLD_Emergency → power_off
+      ├ 가속시간(byte2) → can_accel_rate,  감속시간(byte3) → can_decel_rpm_per_10ms
+      └ alive 타이머 갱신 (300ms 두절 시 inputRaw.io 및 램프 계수 기본값 복원)
+</pre>
+
+<h3>7.2 송신: VCU 상태 (0x5B8, 100ms 주기, DLC=8)</h3>
+<table>
+  <tr><th>바이트</th><th>내용</th><th>비고</th></tr>
+  <tr><td>0~2</td><td>RPM1(12bit) + RPM2(12bit) 패킹</td><td>-3600~+3600 → 0~4095 인코딩, 전송 배율 1.667</td></tr>
+  <tr><td>3</td><td>전류 [A] (8bit)</td><td>홀 센서(WCS1600) 측정</td></tr>
+  <tr><td>4~6</td><td>배터리×10(10bit) + 모터온도(7bit) + FET온도(7bit) 패킹</td><td>배터리 0.1V 해상도(+0.5V 보정)</td></tr>
+  <tr><td>7</td><td>상태 플래그</td><td>bisang(비상), emb, emb_error, can_ready, limitSwitch, spray</td></tr>
+</table>
+<div class="info">아성 ESP32 인터페이스는 이 0x5B8 프레임을 수신하여 LCD에 전압·속도·온도를 표시합니다.</div>
+
+<h3>7.3 설정 프로토콜 (미지원)</h3>
+<p>0x700(설정 요청) / 0x708~0x70C(저장) / 0x5B0~0x5B7(응답) 프로토콜은 수신은 되나
+<strong>본 펌웨어에서는 비활성화</strong> 상태입니다(SYSTEM_CONF 미사용). 해당 프레임 수신 시 무시 로그만 출력합니다.</p>
+
+<h2 id="motor">8. 모터 명령 처리</h2>
+<ul>
+  <li><strong>명령 FIFO</strong>: 로컬/CAN 입력 모두 동일한 큐로 투입, 50ms마다 1개 소비</li>
+  <li><strong>가감속 램프</strong>: 로그 스케일 가속, DC-Link 전압 감시 기반 회생 제한 감속</li>
+  <li><strong>방향 전환</strong>: 정지 확인 후 100ms 브리지 안정화 대기 후 역방향 인가</li>
+  <li><strong>단락 제동</strong>: 중립 진입 후 램프 완료 시 모터 회전 중에만 적용, DC-Link 과전압 시 강제 적용</li>
+  <li><strong>FET 온도 디레이팅</strong>: 85°C부터 PWM 비례 축소, 100°C에서 차단</li>
+</ul>
+
+<h2 id="protect">9. 보호 기능</h2>
+<table>
+  <tr><th>보호</th><th>조건</th><th>동작</th><th>FND</th></tr>
+  <tr><td>션트 과전류 (DC-Link 단락)</td><td>PA2 ADC 워치독 임계 초과 + DC-Link 전압 동반 붕괴 (24V: 2000, 48V: 2500 ADC)</td><td><strong>즉시 SD 차단 + MC1/MC2 개방</strong> (하드웨어 인터럽트)</td><td>7</td></tr>
+  <tr><td>홀 전류 과전류</td><td>80A 이상 지속</td><td>PWM 차단 → 대기 후 재시도, <strong>3회 초과 시 전원 차단</strong></td><td>9</td></tr>
+  <tr><td>FET 과온</td><td>85°C 디레이트 시작 / 100°C 차단 / 80°C 이하 자동 복귀</td><td>PWM 축소·차단 (릴레이는 유지)</td><td>3</td></tr>
+  <tr><td>저전압 / 과전압</td><td>24V 모드: 21.0V 미만 / 30.0V 초과 (48V 모드는 자동 스케일)</td><td>에러 표시</td><td>1 / 2</td></tr>
+  <tr><td>모터 온도 / Fault</td><td>모터 NTC 초과 / fault 신호</td><td>에러 표시</td><td>4 / 5·6</td></tr>
+  <tr><td>CAN 통신 두절</td><td>정상 구동 프레임 수신 후 300ms 이상 무수신</td><td>안전 정지 및 통신 복구 대기</td><td>8</td></tr>
+  <tr><td>비상정지</td><td>CAN btn.emergency 또는 로컬 입력</td><td>power_off (전 릴레이 개방)</td><td>-</td></tr>
+  <tr><td>IWDG</td><td>메인루프 정지 시 약 12.8초</td><td>MCU 리셋</td><td>-</td></tr>
+</table>
+
+<h2 id="fnd">10. FND 표시 / 에러코드</h2>
+<p>정상 상태(코드 0)에서는 차량 모드에 따라 A(AS) 또는 F(Follow Me)를 표시하며,
+CAN 구동 프레임이 정상 수신되는 동안 소수점(DP)이 1초 주기로 점멸합니다.</p>
+<table>
+  <tr><th>코드</th><th>의미</th><th>조치</th></tr>
+  <tr><td>0</td><td>정상</td><td>-</td></tr>
+  <tr><td>1</td><td>저전압</td><td>배터리 충전/전압 확인</td></tr>
+  <tr><td>2</td><td>과전압</td><td>배터리·충전기 확인</td></tr>
+  <tr><td>3</td><td>FET 과온</td><td>냉각 대기 (80°C 이하 자동 복귀)</td></tr>
+  <tr><td>4</td><td>모터 과온</td><td>부하 감소, 냉각</td></tr>
+  <tr><td>5 / 6</td><td>모터1 / 모터2 Fault</td><td>모터 배선·상태 점검</td></tr>
+  <tr><td>7</td><td><strong>션트 과전류 (DC-Link 단락 감지)</strong></td><td>전원 재투입 전 브리지/배선 단락 점검 필수</td></tr>
+  <tr><td>8</td><td>CAN 구동 통신 두절</td><td>송신기 전원·CAN 배선·종단저항·Bus-Off 상태 확인</td></tr>
+  <tr><td>9</td><td>과전류 (재시도 초과)</td><td>부하·모터 구속 점검 후 전원 재투입</td></tr>
+</table>
+
+<h2 id="uart">11. UART 로그 (CON1 1·2·3번, 115200 8N1)</h2>
+<table>
+  <tr><th>로그</th><th>시점</th><th>내용</th></tr>
+  <tr><td><code>===MAIN START===</code></td><td>부팅</td><td>펌웨어 시작</td></tr>
+  <tr><td><code>### AS-CAN MODE ... ###</code></td><td>부팅</td><td>4-5 점퍼 감지 시</td></tr>
+  <tr><td><code>#CAN RX type[..] L[..] R[..] ...</code></td><td>CAN 수신 시</td><td>첫 5프레임 + 이후 약 1초당 1회. type: 1=방제차, 2=리프트, 3=AS</td></tr>
+  <tr><td><code>SHUNT TRIP: adc=.. thr=.. vdc=..</code></td><td>션트 보호 트립</td><td>트립 ADC값/임계값/DC-Link 전압</td></tr>
+  <tr><td><code>### FET TEMP ... ###</code></td><td>FET 온도 보호</td><td>차단/자동복귀</td></tr>
+  <tr><td>상태 로그 (FNR1[..] ...)</td><td>100ms</td><td>기본 비활성(<code>#if 0</code>). 필요 시 dataclass.cpp에서 활성화</td></tr>
+</table>
+
+<h2 id="trouble">12. 트러블슈팅</h2>
+<table>
+  <tr><th>증상</th><th>점검 순서</th></tr>
+  <tr><td>메인 릴레이(MC1)가 안 붙음</td><td>① FND 7/9 여부(보호 트립) ② ULN2003 입력·출력, COM(9번) 코일 전원 ③ PD2 핀 대GND 저항(정상: 수십 kΩ 이상) — 2Ω 수준이면 드라이버 또는 MCU 핀 단락</td></tr>
+  <tr><td>CAN 수신 안 됨</td><td>① 마스터 비트레이트 500kbps 확인 ② CAN_H/L 배선·종단 ③ 트랜시버 U6 VCC(3.3V)·D(1번)·R(4번) 신호 ④ MCU 교체 이력이 있으면 PA11/PA12 납땜</td></tr>
+  <tr><td>수신은 되는데 마스터가 응답(0x5B8)을 못 받음</td><td>이 노드의 TX 경로 점검: PA12 → U6 D(1번) 도통, ACK 펄스 유무 (수신만 되고 송신이 안 되면 버스 에러 카운터가 포화되어 결국 수신도 멈춤)</td></tr>
+  <tr><td>AS 모드로 진입 안 됨</td><td>① CON1 4-5 점퍼 접촉 ② 부팅 로그에 AS-CAN MODE 표시 여부 ③ PA8 전압 (점퍼 시 3.3V)</td></tr>
+  <tr><td>CAN 두절 시 이상 거동</td><td>일반 모드: 300ms 후 로컬 복귀가 정상. AS 모드: 정지 유지가 정상(로컬 레버 무반응은 의도된 안전 동작)</td></tr>
+</table>
+
+</div>
+
+<footer>
+  2026ydriver 사용설명서 &mdash; 문서 기준일 2026-09-05 &middot; 펌웨어 소스: prj-stm32ide/vcu/ycbrain/2026ydriver
+</footer>
+
+</body>
+</html>
