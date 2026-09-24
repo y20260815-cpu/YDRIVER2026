@@ -39,11 +39,6 @@ enum ENUM_KIND_SWITCH{
 	SW_LIFT,
 	SW_BISANG,
 };
-enum ENUM_FM2000_KIND_SWITCH{
-	FM2000_FNR1=0,
-	FM2000_FNR2,
-	FM2000_BISANG,
-};
 
 enum ENUM_DIR_SWITCH_STATE {
 	CENTER=0,
@@ -262,17 +257,6 @@ typedef union _MY_BUTTON {
   };
   uint8_t u8;
 } MY_BUTTON;
-
-typedef union _FM2000_BUTTON {
-  struct {
-    uint8_t FNR1: 2;
-    uint8_t FNR2: 2;
-    uint8_t x1:   2;
-    uint8_t x2 :  1;
-    uint8_t emergency : 1;
-  };
-  uint8_t u8;
-} FM2000_BUTTON;
 
 typedef struct _MY_IO
 {

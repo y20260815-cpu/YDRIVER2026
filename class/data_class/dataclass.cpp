@@ -246,13 +246,38 @@ float data_class::LogRampStep(float target, float current, uint32_t elapsed_ms)
     float step;
     if(is_decelerating) {
         float decel_scale = 1.0f;
-        float dc_link_voltage = pDcLink->ReadFastVoltage();
-        float reference_voltage = (stop_vdc_reference > 1.0f)
-                ? stop_vdc_reference : dc_link_voltage;
+        // Filtered bus voltage: raw ReadFastVoltage() samples PWM switching
+        // ripple and defeated the slow/hold comparison under load.
+        float dc_link_voltage = batt.measure_battery_voltage;
+        float reference_voltage;
+        if(stop_vdc_reference > 1.0f) {
+            reference_voltage = stop_vdc_reference;
+            decel_vdc_fallback = 0.0f;
+        }
+        else {
+            // No stop reference (direction reversal etc.): latch the bus
+            // voltage at decel start. Using the live voltage as reference
+            // tracked its own rise and never slowed the ramp.
+            if(decel_vdc_fallback <= 1.0f) decel_vdc_fallback = dc_link_voltage;
+            reference_voltage = decel_vdc_fallback;
+        }
         float slow_voltage = reference_voltage * DECEL_VDC_SLOW_RATIO;
         float hold_voltage = reference_voltage * DECEL_VDC_HOLD_RATIO;
 
         if(dc_link_voltage >= hold_voltage) {
+            // Regen has pumped the bus into the hold band. The old 10 %
+            // minimum kept charging until the hard short-brake tripped at
+            // full speed (measured 57.8 -> 70.7 V, then a 1.0-duty short at
+            // ~2000 rpm). Pause the ramp at the band edge and above it back
+            // off toward the BEMF-matched duty so charging actually stops.
+            if(fabsf(current) > 0.05f && fabsf(current) < 0.98f) {
+                float band = reference_voltage * 0.05f;
+                float backoff = (band > 0.1f)
+                        ? (dc_link_voltage - hold_voltage) / band : 1.0f;
+                if(backoff > 1.0f) backoff = 1.0f;
+                float rate = can_decel_rpm_per_10ms / CONTROL_TARGET_MAX_RPM;
+                return (current < 0.0f ? -1.0f : 1.0f) * rate * backoff;
+            }
             decel_scale = DECEL_VDC_MIN_SCALE;
         }
         else if(dc_link_voltage > slow_voltage) {
@@ -265,6 +290,7 @@ float data_class::LogRampStep(float target, float current, uint32_t elapsed_ms)
         step = (can_decel_rpm_per_10ms / CONTROL_TARGET_MAX_RPM) * decel_scale;
     }
 	else {
+		decel_vdc_fallback = 0.0f;
 		/*
 		 * Time-based S-curve acceleration.  The inverse smoothstep recovers
 		 * the current phase, then advances it by one 10 ms control tick.
@@ -426,8 +452,18 @@ float data_class::Calcu_motor_command_pwm(float requested_pwm, uint8_t &confirme
 			dir_change_wait_cnt = 0;
 		}
 	}
-	else if(request_dir != 0 && confirmed_dir == 0 && current_dir == 0) {
-		confirmed_dir = request_dir;
+	else if(request_dir != 0 && confirmed_dir == 0) {
+		// EMB-start launches bypass this routine, so confirmed_dir can still
+		// be 0 while already moving. Latch when the motion agrees with the
+		// request; if it opposes, force the same stop-first interlock as a
+		// confirmed reversal (this gap skipped the VDC-aware deceleration and
+		// ended in a full-speed hard short brake).
+		if(current_dir == 0 || current_dir == request_dir) {
+			confirmed_dir = request_dir;
+		}
+		else {
+			target_pwm = 0.0f;
+		}
 		dir_change_wait_cnt = 0;
 	}
 
@@ -516,9 +552,17 @@ void data_class::ProcessMotorCommandQueue()
 						&& fabsf(command.pwm1) > stop_threshold)
 				|| (fabsf(active_command_pwm2) <= stop_threshold
 						&& fabsf(command.pwm2) > stop_threshold);
+		// Opposite-sign command while the ramp output still runs the other
+		// way: the interlock will decelerate through zero first, and that
+		// regen phase needs a valid DC-link reference.
+		uint8_t reversing =
+				(fabsf(currentPWM1) > stop_threshold
+						&& command.pwm1 * currentPWM1 < 0.0f)
+				|| (fabsf(currentPWM2) > stop_threshold
+						&& command.pwm2 * currentPWM2 < 0.0f);
 		// A reference captured by the previous stop is no longer valid after
 		// the supply voltage changes or a new drive cycle begins.
-		if(starting_drive) stop_vdc_reference = 0.0f;
+		if(starting_drive && !reversing) stop_vdc_reference = 0.0f;
 		if(fabsf(active_command_pwm1) > stop_threshold
 				&& fabsf(command.pwm1) <= stop_threshold) {
 			stop_ramp_active_mask |= 0x01;
@@ -529,7 +573,13 @@ void data_class::ProcessMotorCommandQueue()
 			stop_ramp_active_mask |= 0x02;
 			entering_stop = 1;
 		}
-		if(entering_stop) stop_vdc_reference = pDcLink->ReadFastVoltage();
+		if(entering_stop
+				|| (reversing && stop_vdc_reference <= 1.0f))
+			// Filtered voltage: a single raw adc_buf sample under 8-9 A load
+			// caught switching spikes (~+7 V), inflating the reference so the
+			// decel slow/hold band never engaged and the bus ran to the 70 V
+			// hard short-brake (full-speed abrupt stop).
+			stop_vdc_reference = batt.measure_battery_voltage;
 		active_command_pwm1 = command.pwm1;
 		active_command_pwm2 = command.pwm2;
 		motor_command_head = (motor_command_head + 1) % MOTOR_COMMAND_QUEUE_DEPTH;
@@ -539,24 +589,6 @@ void data_class::ProcessMotorCommandQueue()
 
 void data_class::UpdateMotorCommandOutput()
 {
-	// FNR neutral overrides the selected command source, but the actual motor
-	// PWM still goes through the controlled DC-link-aware deceleration ramp.
-	// The local FNR lever is only authoritative for on-board control; a
-	// stale/neutral lever reading must not block active CAN commands.
-	uint8_t entering_fnr_stop = 0;
-	if(!sysFlag.canReady && fm2000_gpio.FNR1 == 3 && fabsf(active_command_pwm1) > 0.01f) {
-		active_command_pwm1 = 0.0f;
-		stop_ramp_active_mask |= 0x01;
-		entering_fnr_stop = 1;
-	}
-	if(!sysFlag.canReady && fm2000_gpio.FNR2 == 3 && fabsf(active_command_pwm2) > 0.01f) {
-		active_command_pwm2 = 0.0f;
-		stop_ramp_active_mask |= 0x02;
-		entering_fnr_stop = 1;
-	}
-	if(entering_fnr_stop && stop_vdc_reference <= 1.0f)
-		stop_vdc_reference = pDcLink->ReadFastVoltage();
-
 	inputRaw.source_pwm.f1 = active_command_pwm1;
 	inputRaw.source_pwm.f2 = active_command_pwm2;
 	// While the short brake owns a motor bridge the drive output is forced to
@@ -581,6 +613,12 @@ void data_class::UpdateMotorCommandOutput()
 		currentPWM2 = pPWM->LimitElectromagneticBrakeStartPwm(active_command_pwm2);
 		inputRaw.target_pwm.f1 = currentPWM1;
 		inputRaw.target_pwm.f2 = currentPWM2;
+		// This path bypasses Calcu_motor_command_pwm, so latch the confirmed
+		// direction here; otherwise the later reversal interlock never arms.
+		fm2000_dir1 = (active_command_pwm1 > 0.01f) ? 1 :
+				(active_command_pwm1 < -0.01f) ? 2 : fm2000_dir1;
+		fm2000_dir2 = (active_command_pwm2 > 0.01f) ? 1 :
+				(active_command_pwm2 < -0.01f) ? 2 : fm2000_dir2;
 		accel_curve1.active = accel_curve2.active = 0U;
 		accel_curve1.elapsed_ms = accel_curve2.elapsed_ms = 0U;
 		accel_last_update_ms1 = accel_last_update_ms2 = control_millis;
@@ -700,21 +738,6 @@ float data_class::Calcu_limit(float throttle, float limit){
 //	}
 //	return result;
 //}
-
-void data_class::ON_Board_INPUT()
-{
-	//Get_AdcData();
-	read_in_port();
-	inputRaw.rpm.f1=pPWM->rpm.f1;
-	inputRaw.rpm.f2=pPWM->rpm.f2;
-
-	float requested_pwm1 = (fm2000_gpio.FNR1 == 1) ? adc_to_pwm(ladcValue[0]) :
-	                       (fm2000_gpio.FNR1 == 2) ? -adc_to_pwm(ladcValue[0]) : 0.0f;
-	float requested_pwm2 = (fm2000_gpio.FNR2 == 1) ? adc_to_pwm(ladcValue[1]) :
-	                       (fm2000_gpio.FNR2 == 2) ? -adc_to_pwm(ladcValue[1]) : 0.0f;
-	QueueMotorCommand(requested_pwm1, requested_pwm2);
-	return;
-}
 
 void data_class::can_process_routine()
 {
@@ -951,13 +974,8 @@ void data_class::ten_millisec_routine()
 			brake_delay = ELECTROMAGNETIC_BRAKE_DELAY_MS;
 		}
 		sysFlag.canReady = 0;
-		if(as_can_mode) {
-			// AS 모드는 CAN 전용: 로컬 FNR 폴백 대신 정지 명령을 유지한다.
-			if(motor_command_tick_50ms) QueueMotorCommand(0.0f, 0.0f);
-		}
-		// Do not enqueue 10 ms ADC intermediate values into a queue consumed
-		// at 50 ms. That creates stale-command lag during a rapid stop.
-		else if(motor_command_tick_50ms) ON_Board_INPUT();
+		// GPIO FNR 미사용(CAN 전용): CAN 두절 시 정지 명령을 유지한다.
+		if(motor_command_tick_50ms) QueueMotorCommand(0.0f, 0.0f);
 	}
 	// 명령 FIFO는 50 ms마다 하나씩 실행한다. 선택된 명령에 대한
 	// PWM 램프/제동 출력 계산은 기존 10 ms 주기를 유지한다.
@@ -972,8 +990,6 @@ void data_class::ten_millisec_routine()
 //++++++++++++
 	float fet_temp_pwm_scale = get_fet_temp_pwm_scale();
 	// PID feedback: keep the measured speed updated for every command source.
-	// ON_Board_INPUT() only runs in local mode, so without this the CAN path
-	// fed rpm=0 into the PID and it railed at +0.2 (over-speed).
 	inputRaw.rpm.f1 = pPWM->rpm.f1;
 	inputRaw.rpm.f2 = pPWM->rpm.f2;
 	// Speed closed loop: PID on by default, master can disable per frame
@@ -1048,9 +1064,8 @@ void data_class::hnd_millisec_routine(){
 	static uint8_t simple_log_cnt = 0;
 	if(++simple_log_cnt >= 5) {
 		simple_log_cnt = 0;
-		printf("FNR[%d,%d] txRPM[%d,%d] canPWM[%d,%d] tgt[%.2f,%.2f] pid[%.2f,%.2f] ofs[%.1f,%.1f] "
+		printf("txRPM[%d,%d] canPWM[%d,%d] tgt[%.2f,%.2f] pid[%.2f,%.2f] ofs[%.1f,%.1f] "
 				"st[rdy%d pwr%d err%d ocp%d emg%d act%.2f,%.2f]\r\n",
-				fm2000_gpio.FNR1, fm2000_gpio.FNR2,
 				(int)(pPWM->rpm.f1 * 1.667f), (int)(pPWM->rpm.f2 * 1.667f),
 				vcu_sdu.LeftMotor_velocity, vcu_sdu.RightMotor_velocity,
 				inputRaw.target_pwm.f1, inputRaw.target_pwm.f2,
@@ -1064,14 +1079,12 @@ void data_class::hnd_millisec_routine(){
 #if 0 // CAN 테스트 중 상태 로그 차단: #CAN RX 로그만 출력
 	DoubleF_VALUE brake_duty = pPWM->GetShortBrakeDuty();
 	float dc_link_fast_log = pDcLink->ReadFastVoltage();
-	printf("FNR1[%d] FNR2[%d] error[%d] [%.1fV/%.2fA] Vfast[%.1f] Vref[%.1f] FT[%d] "
+	printf("error[%d] [%.1fV/%.2fA] Vfast[%.1f] Vref[%.1f] FT[%d] "
 			"src[%.2f,%.2f] tgt[%.2f,%.2f] "
 			"rpm[%.0f,%.0f] trpm[%.0f,%.0f] erpm[%.0f,%.0f] "
 			"pid[%.3f,%.3f] drv[%.3f,%.3f] brk[%.3f,%.3f] "
 			"hall[%.1f] Iraw[%u] adc[%u] m_current[%.1f,%.1f] "
 			"ADC[%d,%d,%d,%d] OCraw[%u,%u] OC[%u/%u] OCv[%.1f/%.1f]\r\n",
-			fm2000_gpio.FNR1,
-			fm2000_gpio.FNR2,
 			error_code.code,
 			batt.measure_battery_voltage,
 			batt.measure_hall_current,
@@ -1119,7 +1132,7 @@ void data_class::send_uart3_csv()
 			"$VCU,%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d,%d,%.3f,%.3f,%.3f,%.3f,%.1f,%.1f,%.1f,%.1f,%d,%d,%.2f,%.2f,%u,%u\r\n",
 			(unsigned long)control_millis, source, (unsigned int)sysFlag.canReady,
 			(unsigned int)ladcValue[0], (unsigned int)ladcValue[1],
-			(unsigned int)fm2000_gpio.FNR1, (unsigned int)fm2000_gpio.FNR2,
+			0U, 0U, /* fnr1,fnr2: GPIO FNR 제거, 필드 위치 호환용 */
 			(unsigned int)inputRaw.io.toggle.u8, (unsigned int)inputRaw.io.btn.u8,
 			accel_raw, byte3_raw,
 			(int)vcu_sdu.LeftMotor_velocity, (int)vcu_sdu.RightMotor_velocity,
@@ -1183,20 +1196,6 @@ void data_class::onesec_routine()
 //	batt.measure_battery_voltage=get_voltage(ladcValue[7]);
 	update_error_code_once_per_second();
 	display_error_code_once_per_second();
-
-//	printf("FNR1[%d] FNR2[%d] error[%d] [%.1fV/%.2fA] FT[%d] src[%.2f,%.2f] tgt[%.2f,%.2f] [%lu,%lu] ADC[%d,%d,%d,%d]\r\n",
-//			fm2000_gpio.FNR1,
-//			fm2000_gpio.FNR2,
-//			error_code.code,
-//			batt.measure_battery_voltage,
-//			batt.measure_m12_current,
-//			batt.fet_temp,
-//			inputRaw.source_pwm.f1,
-//			inputRaw.source_pwm.f2,
-//			inputRaw.target_pwm.f1,
-//			inputRaw.target_pwm.f2,
-//			ladcValue[2],ladcValue[3],
-//			ladcValue[6],ladcValue[7],ladcValue[8],ladcValue[9]);
 
 
 //printf("Potentio_val[%04d] limit[%04d] toggle[%02d] mi_dir[%d] m2_dir[%d]\r\n", Potentio_val, vcu_sdu.limit, vcu_sdu.toggle.u8, sysFlag.motor_dir1, sysFlag.motor_dir2);
@@ -1620,7 +1619,16 @@ void data_class::update_error_code_once_per_second()
 
 	memset(&error_code,0,sizeof(ERROR_CODE_STATE));
 	error_code.low_voltage = (measured_voltage < low_voltage);
-	error_code.over_voltage = (measured_voltage > over_voltage);
+	// Regen deceleration intentionally rides ~1.03-1.10x of the stop-entry
+	// voltage for a second or two; only a sustained rise is a real fault.
+	static uint8_t over_voltage_confirm_cnt = 0;
+	const uint8_t over_voltage_confirm_ticks = 3; /* 1 s 호출 주기 x 3 = 3 s 지속 시 확정 */
+	if(measured_voltage > over_voltage) {
+		if(over_voltage_confirm_cnt < over_voltage_confirm_ticks)
+			over_voltage_confirm_cnt++;
+	}
+	else over_voltage_confirm_cnt = 0;
+	error_code.over_voltage = (over_voltage_confirm_cnt >= over_voltage_confirm_ticks);
 	error_code.fet_over_temperature = (fet_temp_protect || (int8_t)batt.fet_temp >= FET_TEMP_DERATE_START);
 	error_code.motor_over_temperature = ((int8_t)batt.motor_temp > LIMIT_MOTOR_TEMP);
 	error_code.motor1_fault = batt.moter_error.m1_error;
@@ -1703,30 +1711,6 @@ int8_t data_class::get_ntc_temperature(uint16_t adc)
 uint8_t data_class::get_switch_port(uint8_t port){
 	uint8_t rdata=0;
 	return rdata;
-}
-
-void data_class::get_fm2000_port(){
-	uint8_t rdata=0;
-	rdata|=!!(HAL_GPIO_ReadPin(pIO_AP_GPIO_Port, pIO_AP_Pin));
-	rdata<<=1;
-	rdata|=!!(HAL_GPIO_ReadPin(pIO_AN_GPIO_Port, pIO_AN_Pin));
-	rdata %=4;
-	fm2000_gpio.FNR1=rdata;
-
-	rdata=0;
-	rdata|=!!(HAL_GPIO_ReadPin(pIO_BP_GPIO_Port, pIO_BP_Pin));
-	rdata<<=1;
-	rdata|=!!(HAL_GPIO_ReadPin(pIO_BN_GPIO_Port, pIO_BN_Pin));
-	rdata %=4;
-	fm2000_gpio.FNR2=rdata;
-	fm2000_gpio.emergency=0;//!!(HAL_GPIO_ReadPin(pIO_DN_GPIO_Port, pIO_DN_Pin));
-}
-
-void data_class::read_in_port(){
-
-	uint8_t rdata=0;
-	get_fm2000_port();
-	if(fm2000_gpio.emergency==1) HOLD_Emergency=1;
 }
 
 int data_class::clamp(int value, int min, int max) {

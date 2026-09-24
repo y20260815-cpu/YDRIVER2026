@@ -188,18 +188,15 @@ DoubleF_VALUE PWM16::Dual_Motor_GetVelocty(){
 	static float filtered_rpm2 = 0.0f;
 
 	auto calculate_rpm = [bemf_to_rpm](float bemf, float offset,
-			float target_pwm, uint8_t fnr,
+			float target_pwm,
 			float previous_rpm) -> float {
 
 		float value = fabsf(bemf - offset) * bemf_to_rpm;
 		bool reverse;
-		// The actual drive sign (target_pwm) must win: in CAN mode the local
-		// FNR lever can sit in reverse while CAN commands forward, which
-		// flipped the sign and applied the wrong forward/reverse scale.
+		// BEMF cannot measure direction: the drive sign (target_pwm) wins and
+		// while coasting the previous rotation sign is kept (GPIO FNR unused).
 		if(target_pwm < -0.01f) reverse = true;
 		else if(target_pwm > 0.01f) reverse = false;
-		else if(fnr == 2) reverse = true;
-		else if(fnr == 1) reverse = false;
 		else reverse = (previous_rpm < 0.0f);
 		// Stopped-state hysteresis: floating-terminal noise reaches ~1.5x
 		// MOTOR_MIN_RPM, so leaving the zero state without a drive command
@@ -215,11 +212,9 @@ DoubleF_VALUE PWM16::Dual_Motor_GetVelocty(){
 
 	float rpm1 = calculate_rpm(bemf1, bemf_offset1,
 			pDataClass->inputRaw.target_pwm.f1,
-			pDataClass->fm2000_gpio.FNR1,
 			filtered_rpm1);
 	float rpm2 = calculate_rpm(bemf2, bemf_offset2,
 			pDataClass->inputRaw.target_pwm.f2,
-			pDataClass->fm2000_gpio.FNR2,
 			filtered_rpm2);
 
 	auto filter_rpm = [](float value, float &filtered, float target_pwm) -> float {
@@ -302,12 +297,10 @@ DoubleF_VALUE PWM16::Dual_Motor_GetVelocty(){
     m_rpm1=(vBEMF1*BEMF_GAIN);
     m_rpm2=0.0f;
 
-    if(pDataClass->fm2000_gpio.FNR1 == 2
-    		|| pDataClass->inputRaw.target_pwm.f1 < -0.01f) {
+    if(pDataClass->inputRaw.target_pwm.f1 < -0.01f) {
     	m_rpm1 = -m_rpm1;
     }
-    else if(pDataClass->fm2000_gpio.FNR1 != 1
-    		&& pDataClass->inputRaw.target_pwm.f1 <= 0.01f) {
+    else if(pDataClass->inputRaw.target_pwm.f1 <= 0.01f) {
     	m_rpm1 = 0.0f;
     }
 //ff rr motor rpm differ++

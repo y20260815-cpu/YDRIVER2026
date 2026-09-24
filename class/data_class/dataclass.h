@@ -25,7 +25,7 @@
 // Acceleration no longer comes from CAN; it is the fixed constant below.
 #define CAN_ACCEL_TIME_REF 300.0f
 // Fixed 0 -> 100% S-curve acceleration time in 10 ms ticks (500 = 5 s).
-#define ACCEL_DURATION_10MS_TICKS 500U
+#define ACCEL_DURATION_10MS_TICKS 200U //500->5sec
 #define CAN_ACCEL_TIME_MIN_RAW 10U
 #define CAN_ACCEL_TIME_MAX_RAW 200U
 #define CAN_ACCEL_TIME_DEFAULT_RAW 50U
@@ -108,6 +108,10 @@ private:
 	uint8_t last_received_command_valid = 0;
 	uint8_t motor_command_10ms_count = 0;
 	float stop_vdc_reference = 0.0f;
+	// Latched bus voltage for the decel Vdc feedback when no stop reference
+	// exists (e.g. direction reversal); tracking the live rising voltage
+	// disabled the feedback and let the bus climb to the 70 V hard limit.
+	float decel_vdc_fallback = 0.0f;
 	// Bit 0: M1, bit 1: M2.  A forward/reverse -> stop command keeps
 	// subsequent queued targets blocked until the commanded PWM reaches zero.
 	uint8_t stop_ramp_active_mask = 0;
@@ -146,7 +150,6 @@ private:
 
 	int16_t FormSensorMnt_CalCPUTemp(uint16_t value);
 	int8_t get_ntc_temperature(uint16_t adc);
-	void read_in_port();
 
 	void relay_control();
 	void lift_control(uint8_t Xlift, uint8_t Wlift);
@@ -185,7 +188,6 @@ private:
 	void ClearMotorCommandQueue();
 	//void Get_IO_PARM();
 	POSITION_ANGLE Detect_Change_evt(uint8_t toggle_jenhujin, uint8_t botton_LR);
-	void ON_Board_INPUT();
 	float Calcu_limit(float throttle, float limit);
 //	DoubleF_VALUE Calcu_sourcePWM(float i_poten, float limit, uint8_t jenhujin, uint8_t stop_lr);
 //	DoubleF_VALUE Calcu_targetPWM(float throttle, float limit, uint8_t jenhujin_key, uint8_t jenhujin_confirmed,
@@ -198,7 +200,6 @@ private:
 	void pack7(uint8_t out[7], int16_t rpm1, int16_t rpm2, uint8_t current, uint16_t batt10, uint8_t motor_temp7, uint8_t fet_temp7);
 	void unpack7(const uint8_t in[7], int16_t &rpm1, int16_t &rpm2, uint8_t &current, uint16_t &batt10, uint8_t &motor_temp7, uint8_t &fet_temp7);
 	float get_emb_resister(uint16_t acc_adc, uint16_t emb_adc);
-	void get_fm2000_port();
 public:
 	//CONF_CHUNK config_table;
 	//uint16_t brake_delay_timeout=10;
@@ -244,7 +245,6 @@ public:
 	MY_IO ex_board_io;
 	MY_BATTERY batt;
 	ERROR_CODE_STATE error_code;
-	FM2000_BUTTON fm2000_gpio;
 	float currentPWM1 = 0.0f;  // 전역 또는 클래스 멤버
 	float currentPWM2 = 0.0f;  // 전역 또는 클래스 멤버
 	uint8_t fm2000_dir1 = 0;

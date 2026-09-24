@@ -36,7 +36,6 @@
 #define PID_REGEN_HOLD_MIN_RPM   300.0f
 #define RPM_FILTER_ALPHA_LOW_SPEED 0.12f
 #define RPM_FILTER_ALPHA_NORMAL 0.30f
-// CONTROL_TARGET_MAX_RPM moved to typedef.h so dataclass.h can derive the
 // stopping-distance-based deceleration rate from it.
 #define VREF_MEASURE_TIME_OUT 10
 #define FILTER_SENSITIVITY 0.1f
