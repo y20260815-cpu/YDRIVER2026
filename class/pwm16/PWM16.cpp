@@ -77,8 +77,10 @@ PWM16::PWM16()
 	integral1=integral2=0;
 	m1_value=0.0f;
 	m2_value=0.0f;  // 초기화 추가
-	bemf_offset1=0.0f;
-	bemf_offset2=0.0f;
+	// bemf_offset is input-referred; startup calibration replaces these
+	// nominal values with the measured PC4/PC5 midpoint.
+	bemf_offset1=BEMF_ADC_ZERO_VOLTAGE/OPAMP_GAIN;
+	bemf_offset2=BEMF_ADC_ZERO_VOLTAGE/OPAMP_GAIN;
 	rpm.f1=0.0f;
 	rpm.f2=0.0f;  // 재부팅 직후 쓰레기값 방지
 	observed_rpm.f1=0.0f;
@@ -147,7 +149,7 @@ void PWM16::Calibrate_BEMF_Offset() {
 
 DoubleF_VALUE PWM16::Dual_Motor_GetVelocty(){
 #if 1
-	const uint8_t samples = 5;
+	const uint8_t samples = 3;
 	float motor_spec_voltage = pDataClass->batt.motor_spec_voltage;
 	if(motor_spec_voltage < 1.0f)
 		motor_spec_voltage = DEFAULT_BATTERY_VOLTAGE;
@@ -155,8 +157,14 @@ DoubleF_VALUE PWM16::Dual_Motor_GetVelocty(){
 	uint32_t adc_sum1 = 0;
 	uint32_t adc_sum2 = 0;
 
+	// Keep the FET-off window short: while all FETs are off the winding
+	// current freewheels through the body diodes into the DC-link and pumps
+	// the bus voltage up, which matters most on a fully charged battery.
+	// 50 us settle was too short: sampling landed inside the diode-freewheel
+	// transient and gave +/-25% rpm jitter. 80 us settle + 10 us gaps also
+	// spans distinct ADC conversions so the 3-sample average is real.
 	DisableAllFETs_Dual();
-	delay_us(100);
+	delay_us(80);
 	for(uint8_t i = 0; i < samples; i++) {
 		adc_sum1 += adc_buf[8];
 		adc_sum2 += adc_buf[9];
@@ -181,7 +189,6 @@ DoubleF_VALUE PWM16::Dual_Motor_GetVelocty(){
 
 	auto calculate_rpm = [bemf_to_rpm](float bemf, float offset,
 			float target_pwm, uint8_t fnr,
-			float forward_scale, float reverse_scale,
 			float previous_rpm) -> float {
 
 		float value = fabsf(bemf - offset) * bemf_to_rpm;
@@ -194,7 +201,6 @@ DoubleF_VALUE PWM16::Dual_Motor_GetVelocty(){
 		else if(fnr == 2) reverse = true;
 		else if(fnr == 1) reverse = false;
 		else reverse = (previous_rpm < 0.0f);
-		value *= reverse ? reverse_scale : forward_scale;
 		// Stopped-state hysteresis: floating-terminal noise reaches ~1.5x
 		// MOTOR_MIN_RPM, so leaving the zero state without a drive command
 		// requires 2x. Once rotating, track down to MOTOR_MIN_RPM as before.
@@ -210,23 +216,36 @@ DoubleF_VALUE PWM16::Dual_Motor_GetVelocty(){
 	float rpm1 = calculate_rpm(bemf1, bemf_offset1,
 			pDataClass->inputRaw.target_pwm.f1,
 			pDataClass->fm2000_gpio.FNR1,
-			M1_BEMF_FORWARD_SCALE, M1_BEMF_REVERSE_SCALE,
 			filtered_rpm1);
 	float rpm2 = calculate_rpm(bemf2, bemf_offset2,
 			pDataClass->inputRaw.target_pwm.f2,
 			pDataClass->fm2000_gpio.FNR2,
-			M2_BEMF_FORWARD_SCALE, M2_BEMF_REVERSE_SCALE,
 			filtered_rpm2);
 
 	auto filter_rpm = [](float value, float &filtered, float target_pwm) -> float {
-		if(value == 0.0f || filtered * value < 0.0f) {
+		// Physical slew limit: the shaft cannot change hundreds of rpm in one
+		// 10 ms tick, so clamp each sample before the IIR filter. A lone zero
+		// while driving fast is BEMF noise, not a stop; it enters the slew
+		// path and ramps down instead of resetting, so a real stall still
+		// reaches zero within a few ticks.
+		const float max_step = 300.0f;
+		const uint8_t hold_zero = (value == 0.0f)
+				&& fabsf(target_pwm) > 0.10f
+				&& fabsf(filtered) > 2.0f * MOTOR_MIN_RPM;
+		if(value == 0.0f && !hold_zero) {
+			filtered = 0.0f;
+		}
+		else if(value != 0.0f && filtered * value < 0.0f) {
 			filtered = value;
 		}
 		else {
+			float limited = value;
+			if(limited > filtered + max_step) limited = filtered + max_step;
+			else if(limited < filtered - max_step) limited = filtered - max_step;
 			const float target_rpm = fabsf(target_pwm) * CONTROL_TARGET_MAX_RPM;
 			const float alpha = target_rpm < PID_LOW_SPEED_THRESHOLD
 					? RPM_FILTER_ALPHA_LOW_SPEED : RPM_FILTER_ALPHA_NORMAL;
-			filtered += alpha * (value - filtered);
+			filtered += alpha * (limited - filtered);
 		}
 		return filtered;
 	};
@@ -619,16 +638,13 @@ float PWM16::UpdateOneShortBrake_1ms(uint8_t brake_request,
 		rise_step = SHORT_BRAKE_FEEDFORWARD_STEP;
 	}
 	if(output_duty < target_duty) {
-		if(vdc_rise_ratio >= SHORT_BRAKE_VDC_RISE_START_RATIO) {
-			// DC-link energy rises much faster than the previous duty slew.
-			// Apply the calculated PWM pulse width immediately; this is still
-			// PWM short braking, not a millisecond full-short/coast toggle.
-			output_duty = target_duty;
-		}
-		else {
-			output_duty += rise_step;
-			if(output_duty > target_duty) output_duty = target_duty;
-		}
+		// Always slew toward the target duty. The old instant apply on a 1%
+		// DC-link rise produced a large torque step (mechanical knock). The
+		// earlier WARN/PROTECT thresholds start the ramp sooner and the
+		// absolute hard limit remains the instant backstop, so protection
+		// coverage is unchanged.
+		output_duty += rise_step;
+		if(output_duty > target_duty) output_duty = target_duty;
 	}
 	else if(output_duty > target_duty) {
 		// Release braking slowly to prevent DC-link feedback hunting and the
@@ -701,7 +717,7 @@ void PWM16::UpdateShortBrakeControl_1ms(uint8_t brake_m1, uint8_t brake_m2,
 	// Relative DC-link rise is handled by PWM duty feedback in
 	// UpdateOneShortBrake_1ms(). Do not alternate full-short/coast at 1 ms
 	// intervals: that binary torque step is audible and causes a mechanical
-	// knock. Only the absolute 58 V hardware-protection limit may bypass the
+	// knock. Only the absolute 70 V hardware-protection limit may bypass the
 	// duty ramp and request a continuous full short.
 	if(brake_m1 && short_brake_vdc_reference_m1 > 1.0f) {
 		if(dc_link_voltage >= vdc_hard) {
@@ -830,6 +846,23 @@ void PWM16::Update_PWM(uint8_t disable_pid, float target_pwm1, float target_pwm2
     const uint8_t pid_gate_m2 = update_pid_gate(target_rpm.f2, current_rpm2,
 			pid_active_m2, pid_entry_ticks_m2);
 
+    // Small errors are BEMF measurement noise, not real speed deviation.
+    auto deadband = [](float error) -> float {
+		return (fabsf(error) < PID_ERROR_DEADBAND_RPM) ? 0.0f : error;
+	};
+
+    // While the command ramp is still moving, the S-curve leads the motor;
+    // wide PID authority there only amplifies the ramp-lag error.
+    const uint8_t ramping_m1 =
+			fabsf(raw_target_pwm.f1 - prev_raw_target1) > PID_RAMP_DETECT_STEP;
+    const uint8_t ramping_m2 =
+			fabsf(raw_target_pwm.f2 - prev_raw_target2) > PID_RAMP_DETECT_STEP;
+    prev_raw_target1 = raw_target_pwm.f1;
+    prev_raw_target2 = raw_target_pwm.f2;
+
+    const float pid_prev1 = pid_pwm.f1;
+    const float pid_prev2 = pid_pwm.f2;
+
     // Stop, explicit disable, and low-speed operation reset the integrator.
     if (disable_pid || stop_throttle) {
         pid_pwm.f1 = 0.0f;
@@ -839,20 +872,52 @@ void PWM16::Update_PWM(uint8_t disable_pid, float target_pwm1, float target_pwm2
 		pid_entry_ticks_m1 = pid_entry_ticks_m2 = 0;
     }
     else {
-		if(pid_gate_m1) pid_pwm.f1 = PID_Compute1(error_rpm.f1);
+		if(pid_gate_m1) pid_pwm.f1 = PID_Compute1(deadband(error_rpm.f1));
 		else { pid_pwm.f1 = 0.0f; integral1 = 0.0f; prev_error1 = error_rpm.f1; }
-		if(pid_gate_m2) pid_pwm.f2 = PID_Compute2(error_rpm.f2);
+		if(pid_gate_m2) pid_pwm.f2 = PID_Compute2(deadband(error_rpm.f2));
 		else { pid_pwm.f2 = 0.0f; integral2 = 0.0f; prev_error2 = error_rpm.f2; }
     }
 
-    // Limit the correction to +/-5% for the first 200 ms after PID entry,
-    // then allow the existing +/-20% normal correction range.
-    const float pid_limit1 = pid_entry_ticks_m1
+    // Limit the correction to +/-5% right after PID entry and while the
+    // command ramp is active; allow +/-20% only in steady state.
+    const float pid_limit1 = (pid_entry_ticks_m1 || ramping_m1)
 			? PID_ENTRY_CORRECTION_LIMIT : PID_NORMAL_CORRECTION_LIMIT;
-    const float pid_limit2 = pid_entry_ticks_m2
+    const float pid_limit2 = (pid_entry_ticks_m2 || ramping_m2)
 			? PID_ENTRY_CORRECTION_LIMIT : PID_NORMAL_CORRECTION_LIMIT;
     pid_pwm.f1 = fmaxf(fminf(pid_pwm.f1, pid_limit1), -pid_limit1);
     pid_pwm.f2 = fmaxf(fminf(pid_pwm.f2, pid_limit2), -pid_limit2);
+
+    // Slew-limit the applied correction so one noisy RPM sample cannot step
+    // the drive PWM. Reset paths above (0.0f) still converge within a few
+    // ticks through the same limiter.
+    if(!disable_pid && !stop_throttle) {
+		pid_pwm.f1 = fmaxf(fminf(pid_pwm.f1, pid_prev1 + PID_OUTPUT_SLEW_PER_10MS),
+				pid_prev1 - PID_OUTPUT_SLEW_PER_10MS);
+		pid_pwm.f2 = fmaxf(fminf(pid_pwm.f2, pid_prev2 + PID_OUTPUT_SLEW_PER_10MS),
+				pid_prev2 - PID_OUTPUT_SLEW_PER_10MS);
+
+		// Regen guard: lowering PWM on a spinning motor pumps energy into the
+		// DC-link; on a full battery that escalated into the over-voltage
+		// trip. Hold the correction while the bus is rising.
+		float dc_link_v = (pDcLink != 0) ? pDcLink->ReadFastVoltage() : 0.0f;
+		if(vdc_regen_baseline <= 1.0f) vdc_regen_baseline = dc_link_v;
+		else vdc_regen_baseline += 0.002f * (dc_link_v - vdc_regen_baseline);
+		const uint8_t vdc_rising = (vdc_regen_baseline > 10.0f)
+				&& (dc_link_v > vdc_regen_baseline * PID_REGEN_HOLD_VDC_RATIO);
+		if(vdc_rising) {
+			auto regen_hold = [](float target, float measured,
+					float pid_new, float pid_prev) -> float {
+				if(fabsf(measured) < PID_REGEN_HOLD_MIN_RPM) return pid_new;
+				const float dir = (target >= 0.0f) ? 1.0f : -1.0f;
+				// Moving against the drive sign reduces drive magnitude.
+				return (dir * pid_new < dir * pid_prev) ? pid_prev : pid_new;
+			};
+			pid_pwm.f1 = regen_hold(raw_target_pwm.f1, current_rpm1,
+					pid_pwm.f1, pid_prev1);
+			pid_pwm.f2 = regen_hold(raw_target_pwm.f2, current_rpm2,
+					pid_pwm.f2, pid_prev2);
+		}
+    }
 	if(pid_active_m1 && pid_entry_ticks_m1) pid_entry_ticks_m1--;
 	if(pid_active_m2 && pid_entry_ticks_m2) pid_entry_ticks_m2--;
 

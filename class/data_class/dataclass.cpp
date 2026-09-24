@@ -89,11 +89,11 @@ void data_class::power_on(){
 	//motor2_polarity=sysConf.motor2_polarity;
 
 	//gamsok_idx=sysConf.brake_rate;
-	// Electromagnetic brake delay is a local fixed setting. CAN byte2 is
-	// reserved for S-curve acceleration time and must not change this value.
+	// Defaults before the first CAN frame: byte2 will override the EMB delay,
+	// acceleration stays at the fixed constant.
 	brake_delay=ELECTROMAGNETIC_BRAKE_DELAY_MS;
 	can_accel_rate = ACCEL_RATE;
-	can_accel_duration_10ms = CAN_ACCEL_TIME_DEFAULT_RAW * 10U;
+	can_accel_duration_10ms = ACCEL_DURATION_10MS_TICKS;
 	can_decel_rpm_per_10ms = DECEL_RPM_PER_10MS;
 	//set_foreward=sysConf.foreward/100.0f;
 	//set_backward=set_foreward;
@@ -488,15 +488,25 @@ void data_class::ProcessMotorCommandQueue()
 	const float stop_threshold = 0.01f;
 
 	// Once a running motor receives a stop command, keep zero as the active
-	// target throughout its ramp-down.  Do not consume (and therefore do not
-	// apply) a newer queued target until every affected motor has reached zero.
+	// target throughout its ramp-down. A newer drive command, however, takes
+	// over immediately from the current ramp value instead of waiting for
+	// zero, so a re-applied throttle resumes from the present speed.
 	if(stop_ramp_active_mask & 0x01) {
 		if(fabsf(currentPWM1) <= stop_threshold) stop_ramp_active_mask &= ~0x01;
 	}
 	if(stop_ramp_active_mask & 0x02) {
 		if(fabsf(currentPWM2) <= stop_threshold) stop_ramp_active_mask &= ~0x02;
 	}
-	if(stop_ramp_active_mask != 0) return;
+	if(stop_ramp_active_mask != 0) {
+		if(motor_command_count == 0) return;
+		const MOTOR_COMMAND &next = motor_command_queue[motor_command_head];
+		// Opposite-direction requests remain safe to release here:
+		// Calcu_motor_command_pwm() still forces a full stop plus settle
+		// time before the confirmed direction may flip.
+		if(fabsf(next.pwm1) <= stop_threshold
+				&& fabsf(next.pwm2) <= stop_threshold) return;
+		stop_ramp_active_mask = 0;
+	}
 
 	if(motor_command_count > 0) {
 		const MOTOR_COMMAND &command = motor_command_queue[motor_command_head];
@@ -549,6 +559,18 @@ void data_class::UpdateMotorCommandOutput()
 
 	inputRaw.source_pwm.f1 = active_command_pwm1;
 	inputRaw.source_pwm.f2 = active_command_pwm2;
+	// While the short brake owns a motor bridge the drive output is forced to
+	// zero, but this ramp kept advancing, so release re-applied a large PWM
+	// step to a stopped motor (measured 15 A inrush, 58 -> 37 V sag).
+	// Restart the S-curve from zero instead.
+	if(pPWM->IsShortBrakeActiveM1()) {
+		currentPWM1 = 0.0f;
+		accel_curve1.active = 0U;
+	}
+	if(pPWM->IsShortBrakeActiveM2()) {
+		currentPWM2 = 0.0f;
+		accel_curve2.active = 0U;
+	}
 	const uint8_t drive_requested =
 			(fabsf(active_command_pwm1) > 0.01f || fabsf(active_command_pwm2) > 0.01f);
 	pPWM->RequestDriveEnable(drive_requested, batt.measure_hall_current);
@@ -709,16 +731,14 @@ void data_class::can_process_routine()
 	}
 	rx_log_cnt++;
 #endif
-	// Byte2(기존 brkDly, raw*5)/Byte3(기존 batt)는 가속/감속 시간으로 재정의.
-	// 현재 마스터 송신값 300/24가 튜닝된 최적 램프와 1:1로 매핑된다.
-	// 값이 클수록 램프가 완만해진다 (시간 ∝ 1/계수).
+	// Byte2는 전자브레이크 딜레이(raw x 5 ms, 기존 brkDly 스케일)로 사용하고
+	// 가속 시간은 상수(ACCEL_DURATION_10MS_TICKS)로 고정한다.
 	{
-		// CAN byte2 controls S-curve acceleration (100 ms/count).
-		// CAN byte3 remains the battery setting and does not affect deceleration.
-		uint16_t accel_raw = can_byte2_raw;
-		if(accel_raw < CAN_ACCEL_TIME_MIN_RAW) accel_raw = CAN_ACCEL_TIME_MIN_RAW;
-		if(accel_raw > CAN_ACCEL_TIME_MAX_RAW) accel_raw = CAN_ACCEL_TIME_MAX_RAW;
-		can_accel_duration_10ms = accel_raw * 10U;
+		uint16_t delay_ms = vcu_sdu.canBrakeDelay; // req[2] * 5
+		if(delay_ms < EMB_DELAY_CAN_MIN_MS) delay_ms = EMB_DELAY_CAN_MIN_MS;
+		if(delay_ms > EMB_DELAY_CAN_MAX_MS) delay_ms = EMB_DELAY_CAN_MAX_MS;
+		brake_delay = delay_ms;
+		can_accel_duration_10ms = ACCEL_DURATION_10MS_TICKS;
 		can_decel_rpm_per_10ms = DECEL_RPM_PER_10MS;
 	}
 	inputRaw.io.btn = vcu_sdu.btn;
@@ -926,8 +946,9 @@ void data_class::ten_millisec_routine()
 			// CAN 두절 시 마지막 CAN 버튼/토글(스프레이 등)이 래치되지 않도록 클리어.
 			memset(&inputRaw.io, 0, sizeof(inputRaw.io));
 			can_accel_rate = ACCEL_RATE;
-			can_accel_duration_10ms = CAN_ACCEL_TIME_DEFAULT_RAW * 10U;
+			can_accel_duration_10ms = ACCEL_DURATION_10MS_TICKS;
 			can_decel_rpm_per_10ms = DECEL_RPM_PER_10MS;
+			brake_delay = ELECTROMAGNETIC_BRAKE_DELAY_MS;
 		}
 		sysFlag.canReady = 0;
 		if(as_can_mode) {

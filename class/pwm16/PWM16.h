@@ -20,15 +20,24 @@
 #define PID_ENTRY_CORRECTION_LIMIT 0.05f
 #define PID_NORMAL_CORRECTION_LIMIT 0.20f
 #define PID_ENTRY_LIMIT_TICKS 20U
+// BEMF noise reaches ~+/-300 rpm; ignore errors below this so the P term
+// does not chatter at steady state.
+#define PID_ERROR_DEADBAND_RPM 80.0f
+// Correction may change at most this much per 10 ms tick, so single-sample
+// BEMF spikes cannot step the drive PWM.
+#define PID_OUTPUT_SLEW_PER_10MS 0.01f
+// Command ramp step above which the motor is considered accelerating; the
+// S-curve leads then and PID stays in the small-correction range.
+#define PID_RAMP_DETECT_STEP 0.001f
+// Regen guard: while the motor spins and the DC-link rises above this ratio
+// of its slow baseline, the PID may not reduce drive magnitude any further
+// (that regen path tripped the over-voltage protection).
+#define PID_REGEN_HOLD_VDC_RATIO 1.02f
+#define PID_REGEN_HOLD_MIN_RPM   300.0f
 #define RPM_FILTER_ALPHA_LOW_SPEED 0.12f
 #define RPM_FILTER_ALPHA_NORMAL 0.30f
-// Measured loaded speed is about 600 rpm at |PWM|=0.83.
-// Keep MOTOR_MAX_RPM for BEMF conversion/clamping and use this independent
-// value only when converting the operator PWM command to target RPM.
-// Measured full-scale speed: canPWM 1000 -> internal ~1500 rpm (txRPM 2500).
-// This maps the command range 1:1 onto the measured speed range for the
-// closed-loop PID; MOTOR_MAX_RPM stays the BEMF conversion full-scale.
-#define CONTROL_TARGET_MAX_RPM   1500.0f
+// CONTROL_TARGET_MAX_RPM moved to typedef.h so dataclass.h can derive the
+// stopping-distance-based deceleration rate from it.
 #define VREF_MEASURE_TIME_OUT 10
 #define FILTER_SENSITIVITY 0.1f
 // Mechanical electromagnetic-brake start sequence (10 ms control task).
@@ -55,12 +64,17 @@
 #define SHORT_BRAKE_PULSE_ON_MS       2
 #define SHORT_BRAKE_PULSE_OFF_MS      1
 #define SHORT_BRAKE_LOW_SPEED_PWM     0.08f
-#define SHORT_BRAKE_LOW_SPEED_RELEASE 0.01f
-#define SHORT_BRAKE_VDC_WARN_RATIO     1.10f
-#define SHORT_BRAKE_VDC_PROTECT_RATIO  1.15f
+#define SHORT_BRAKE_LOW_SPEED_RELEASE 0.005f
+// Duty escalation starts early (+5%/+10% of the stop-entry voltage) so the
+// ramp stays gentle; late thresholds forced abrupt duty jumps that were felt
+// as a mechanical knock, and the tight capacitor rating needs the margin.
+#define SHORT_BRAKE_VDC_WARN_RATIO     1.05f
+#define SHORT_BRAKE_VDC_PROTECT_RATIO  1.10f
 #define SHORT_BRAKE_VDC_HARD_RATIO     1.20f
 // Hardware ceiling always overrides the percentage-based thresholds.
-#define SHORT_BRAKE_VDC_ABSOLUTE_HARD 63.0f
+// Full 48 V pack idles near 58 V; 70 V keeps margin against false trips
+// from switching transients while still protecting the FETs/capacitors.
+#define SHORT_BRAKE_VDC_ABSOLUTE_HARD 70.0f
 #define SHORT_BRAKE_VDC_RATIO_DUTY_MAX 1.00f
 #define SHORT_BRAKE_DUTY_VDC_STEP     0.010f
 #define SHORT_BRAKE_DUTY_WARN_STEP    0.020f
@@ -70,14 +84,6 @@
 #define SHORT_BRAKE_FEEDFORWARD_GAIN  1.50f
 #define SHORT_BRAKE_FEEDFORWARD_STEP  0.001f
 #define SHORT_BRAKE_PWM_PERIOD        1024
-
-// Direction-dependent BEMF path calibration.
-// M2: at |PWM| ~= 0.83, measured reverse ~= 600 rpm and forward ~= 204 rpm.
-// Keep reverse as the reference and compensate the forward BEMF path.
-#define M1_BEMF_FORWARD_SCALE         2.95f
-#define M1_BEMF_REVERSE_SCALE         1.00f
-#define M2_BEMF_FORWARD_SCALE         2.95f
-#define M2_BEMF_REVERSE_SCALE         1.00f
 
 class PWM16
 {
@@ -182,6 +188,9 @@ DoubleF_VALUE slew_pwm;
 	uint8_t pid_active_m2=0;
 	uint8_t pid_entry_ticks_m1=0;
 	uint8_t pid_entry_ticks_m2=0;
+	float prev_raw_target1=0.0f;
+	float prev_raw_target2=0.0f;
+	float vdc_regen_baseline=0.0f;
     float PID_Compute1(float error);
     float PID_Compute2(float error);
     DoubleF_VALUE pidCalibration(uint8_t disable_pid, DoubleF_VALUE input, DoubleF_VALUE pid_pwm);
@@ -217,6 +226,8 @@ uint8_t IsElectromagneticBrakeReleased() const {
 uint8_t IsElectromagneticBrakeStarting() const {
 	return (emb_start_state == EMB_PRELOAD || emb_start_state == EMB_RELEASE_SETTLE) ? 1U : 0U;
 }
+uint8_t IsShortBrakeActiveM1() const { return short_brake_active_m1; }
+uint8_t IsShortBrakeActiveM2() const { return short_brake_active_m2; }
 float LimitElectromagneticBrakeStartPwm(float requested_pwm) const;
 void Dual_Motor_set_pwm10(MOTOR_DIRECTION dm_polar, DoubleF_VALUE fSetPwm, uint8_t disable_pid);
 //void Get_Motor_Vref(uint8_t time_out);

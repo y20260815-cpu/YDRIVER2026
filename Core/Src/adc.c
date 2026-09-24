@@ -124,6 +124,12 @@ void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_7;
   sConfig.Rank = ADC_REGULAR_RANK_8;
+  /*
+   * DC-Link is measured through a high-impedance voltage divider. Give the
+   * ADC sample-and-hold capacitor enough acquisition time; 7.5 cycles can
+   * make this channel read low or depend on the preceding scan channel.
+   */
+  sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -133,6 +139,7 @@ void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_14;
   sConfig.Rank = ADC_REGULAR_RANK_9;
+  sConfig.SamplingTime = ADC_SAMPLETIME_7CYCLES_5;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();

@@ -12,19 +12,26 @@
 #define STABILIZE_DELAY_10MS_TICK 10
 // 0.02 gave 0->100% in ~1 s (harsh launch); 0.012 stretches it to ~1.7 s.
 #define ACCEL_RATE 0.012f
-// Target-speed reduction per 10 ms, in CONTROL_TARGET_MAX_RPM units.
-// 15.0/1500 = 1%/10ms -> full speed to 0 in about 1 s (same feel as the
-// previous 7.2/720 tuning).
-#define DECEL_RPM_PER_10MS 15.0f
-// AS(0x701)/FM(0x702) byte2 controls acceleration time. Byte3 retains the
-// battery-setting meaning used by the existing AS controller.
-// master sends (300 / 24) map exactly to the tuned optimum above.
+// Deceleration is configured by stopping distance instead of ramp time so
+// the setting stays intuitive. Linear ramp from full speed: d = v*T/2, so
+// T = 2*d/v. Default 0.75 m at 1 m/s gives a 1.5 s full-speed ramp
+// (10 rpm/10ms in CONTROL_TARGET_MAX_RPM units).
+#define STOP_DISTANCE_M 0.75f
+#define DECEL_RAMP_TIME_S (2.0f * STOP_DISTANCE_M / VEHICLE_SPEED_AT_MAX_RPM_MPS)
+// Target-speed reduction per 10 ms, derived from the stopping distance.
+#define DECEL_RPM_PER_10MS (CONTROL_TARGET_MAX_RPM * 0.01f / DECEL_RAMP_TIME_S)
+// AS(0x701)/FM(0x702) byte2 is the electromagnetic-brake delay (raw x 5 ms,
+// legacy brkDly scale). Byte3 retains the battery-setting meaning.
+// Acceleration no longer comes from CAN; it is the fixed constant below.
 #define CAN_ACCEL_TIME_REF 300.0f
-// CAN byte2 controls the full 0 -> 100% S-curve acceleration time.
-// 10 = 1 s, 50 = 5 s, 200 = 20 s; values outside this range saturate.
+// Fixed 0 -> 100% S-curve acceleration time in 10 ms ticks (500 = 5 s).
+#define ACCEL_DURATION_10MS_TICKS 500U
 #define CAN_ACCEL_TIME_MIN_RAW 10U
 #define CAN_ACCEL_TIME_MAX_RAW 200U
 #define CAN_ACCEL_TIME_DEFAULT_RAW 50U
+// CAN byte2 x 5 gives ms; clamp to the legacy usable range.
+#define EMB_DELAY_CAN_MIN_MS 50U
+#define EMB_DELAY_CAN_MAX_MS 1275U
 // Existing AS ESP32 menu stores 50/100/150/200 and transmits menu / 5.
 // The STM32 always calculates acceleration from the received raw byte.
 #define CAN_ACCEL_LEGACY_MENU_SCALE 5U

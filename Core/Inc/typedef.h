@@ -16,8 +16,20 @@ using namespace std;
 //#define ZIGBEE_MY_ID 0xCC
 #define MOTOR_MAX_RPM 3600.0f //3600.0f
 #define MOTOR_MIN_RPM 30.0f
+// Keep MOTOR_MAX_RPM for BEMF conversion/clamping and use this independent
+// value only when converting the operator PWM command to target RPM.
+// Recalibrated 2026-09-24: log shows ~2100 rpm at |PWM|=0.80 on a full 58 V
+// pack, so full-scale is ~2600 rpm. The old 1500 made the PID read full
+// throttle as overspeed, saturate at -20% and regen the DC-link into the
+// over-voltage trip.
+#define CONTROL_TARGET_MAX_RPM   2600.0f
+// Physical speed reference: MOTOR_MAX_RPM(3600 rpm) equals this vehicle speed.
+#define VEHICLE_SPEED_AT_MAX_RPM_MPS 1.0f
 
-#define OPAMP_GAIN 0.0567f////A= R2/R3=6.8K/120k=0.0567
+// BEMF differential amplifier: Rf/Rin = 2 kOhm / 120 kOhm = 1/60.
+// PC4 (ADC1_IN14) and PC5 (ADC1_IN15) are centered at 1.70 V.
+#define OPAMP_GAIN                 (2.0f / 120.0f)
+#define BEMF_ADC_ZERO_VOLTAGE      1.70f
 #define DEADZONE_THRESHOLD 0.05f
 #define STOP_INPUT_PWM 0.1f
 
