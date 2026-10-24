@@ -341,6 +341,7 @@ float data_class::PWM_UpdateRoutine(float targetPWM, float currentPWM, uint8_t t
 	uint8_t accelerating = same_direction
 			&& (fabsf(targetPWM) > fabsf(currentPWM) + 0.0001f);
 	if(accelerating) {
+#ifdef PWM_ACCEL_PROFILE_S_CURVE
 		if(!curve.active || fabsf(curve.target_pwm - targetPWM) > 0.001f) {
 			curve.start_pwm = currentPWM;
 			curve.target_pwm = targetPWM;
@@ -357,6 +358,20 @@ float data_class::PWM_UpdateRoutine(float targetPWM, float currentPWM, uint8_t t
 		}
 		float smooth = phase * phase * (3.0f - 2.0f * phase);
 		return curve.start_pwm + (curve.target_pwm - curve.start_pwm) * smooth;
+#else
+		// Linear profile: ACCEL_DURATION_10MS_TICKS is the full-scale
+		// (0 -> 100 %) time. A 50 % change therefore takes half that time.
+		curve.active = 0U;
+		uint16_t duration_ticks = can_accel_duration_10ms;
+		if(duration_ticks < CAN_ACCEL_TIME_MIN_RAW * 10U)
+			duration_ticks = CAN_ACCEL_TIME_MIN_RAW * 10U;
+		float duration_ms = (float)duration_ticks * 10.0f;
+		float step = (duration_ms > 0.0f)
+				? (float)elapsed_ms / duration_ms : 1.0f;
+		float error = targetPWM - currentPWM;
+		if(step >= fabsf(error)) return targetPWM;
+		return currentPWM + ((error < 0.0f) ? -step : step);
+#endif
 	}
 	curve.active = 0U;
     float step = LogRampStep(targetPWM, currentPWM, elapsed_ms);
@@ -1378,6 +1393,53 @@ void data_class::CAN_DCU_Information(){
 	buf[6]=pack_buf[6];//(uint8_t)batt.fet_temp;
 	buf[7]=upFlag.u8;//sysFlag.u8;
 	pCAN->put_canTxd(Pub_ID, buf);
+
+	/*
+	 * Relay/I/O status is published at the same 100 ms point as 0x5B8.
+	 * Byte 1 reports the physical output latch, rather than a cached command,
+	 * so protection-driven relay changes are visible immediately.
+	 *
+	 * Relay bits 6 and 7 are the two valve relay outputs pWUP and pWDN.
+	 * Switch inputs use pull-ups, therefore a low pin level means active.
+	 * Byte 2 upper nibble is A+/A-/B+/B- (bits 7..4), and its lower
+	 * nibble is the error code currently shown on the FND.
+	 */
+	uint8_t status_buf[8]={0,};
+	status_buf[0]=0xA0U;
+	status_buf[1] =
+			((HAL_GPIO_ReadPin(pRY1_GPIO_Port, pRY1_Pin) == GPIO_PIN_SET) ? (1U << 0) : 0U) |
+			((HAL_GPIO_ReadPin(pRY2_GPIO_Port, pRY2_Pin) == GPIO_PIN_SET) ? (1U << 1) : 0U) |
+			((HAL_GPIO_ReadPin(pRY3_GPIO_Port, pRY3_Pin) == GPIO_PIN_SET) ? (1U << 2) : 0U) |
+			((HAL_GPIO_ReadPin(pRY4_GPIO_Port, pRY4_Pin) == GPIO_PIN_SET) ? (1U << 3) : 0U) |
+			((HAL_GPIO_ReadPin(pRY5_GPIO_Port, pRY5_Pin) == GPIO_PIN_SET) ? (1U << 4) : 0U) |
+			((HAL_GPIO_ReadPin(pRY6_GPIO_Port, pRY6_Pin) == GPIO_PIN_SET) ? (1U << 5) : 0U) |
+			((HAL_GPIO_ReadPin(pWUP_GPIO_Port, pWUP_Pin) == GPIO_PIN_SET) ? (1U << 6) : 0U) |
+			((HAL_GPIO_ReadPin(pWDN_GPIO_Port, pWDN_Pin) == GPIO_PIN_SET) ? (1U << 7) : 0U);
+	status_buf[2] =
+			((HAL_GPIO_ReadPin(pIO_AP_GPIO_Port, pIO_AP_Pin) == GPIO_PIN_RESET) ? (1U << 7) : 0U) |
+			((HAL_GPIO_ReadPin(pIO_AN_GPIO_Port, pIO_AN_Pin) == GPIO_PIN_RESET) ? (1U << 6) : 0U) |
+			((HAL_GPIO_ReadPin(pIO_BP_GPIO_Port, pIO_BP_Pin) == GPIO_PIN_RESET) ? (1U << 5) : 0U) |
+			((HAL_GPIO_ReadPin(pIO_BN_GPIO_Port, pIO_BN_Pin) == GPIO_PIN_RESET) ? (1U << 4) : 0U) |
+			(error_code.code & 0x0FU);
+
+	int16_t temperature = (int16_t)batt.fet_temp;
+	if(temperature < -127) temperature = -127;
+	if(temperature > 127) temperature = 127;
+	status_buf[3]=(uint8_t)(int8_t)temperature;
+
+	float voltage_x10_f = batt.measure_battery_voltage * 10.0f;
+	float current_x10_f = batt.measure_hall_current * 10.0f;
+	if(voltage_x10_f < 0.0f) voltage_x10_f = 0.0f;
+	if(voltage_x10_f > 65535.0f) voltage_x10_f = 65535.0f;
+	if(current_x10_f < 0.0f) current_x10_f = 0.0f;
+	if(current_x10_f > 65535.0f) current_x10_f = 65535.0f;
+	uint16_t voltage_x10 = (uint16_t)(voltage_x10_f + 0.5f);
+	uint16_t current_x10 = (uint16_t)(current_x10_f + 0.5f);
+	status_buf[4]=HI_UINT16(voltage_x10);
+	status_buf[5]=LO_UINT16(voltage_x10);
+	status_buf[6]=HI_UINT16(current_x10);
+	status_buf[7]=LO_UINT16(current_x10);
+	pCAN->put_canTxd(0x5A0U, status_buf);
 }
 
 void data_class::MakeDCU_Data()

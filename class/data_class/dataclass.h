@@ -11,6 +11,18 @@
 
 #define STABILIZE_DELAY_10MS_TICK 10
 // 0.02 gave 0->100% in ~1 s (harsh launch); 0.012 stretches it to ~1.7 s.
+// Select exactly one acceleration profile. The default release profile is
+// linear; comment it and enable PWM_ACCEL_PROFILE_S_CURVE to restore the
+// smoothstep S-curve profile.
+#define PWM_ACCEL_PROFILE_LINEAR
+// #define PWM_ACCEL_PROFILE_S_CURVE
+
+#if defined(PWM_ACCEL_PROFILE_LINEAR) && defined(PWM_ACCEL_PROFILE_S_CURVE)
+#error "Select only one PWM acceleration profile"
+#elif !defined(PWM_ACCEL_PROFILE_LINEAR) && !defined(PWM_ACCEL_PROFILE_S_CURVE)
+#error "Select a PWM acceleration profile"
+#endif
+
 #define ACCEL_RATE 0.012f
 // Deceleration is configured by stopping distance instead of ramp time so
 // the setting stays intuitive. Linear ramp from full speed: d = v*T/2, so
@@ -24,8 +36,8 @@
 // legacy brkDly scale). Byte3 retains the battery-setting meaning.
 // Acceleration no longer comes from CAN; it is the fixed constant below.
 #define CAN_ACCEL_TIME_REF 300.0f
-// Fixed 0 -> 100% S-curve acceleration time in 10 ms ticks (500 = 5 s).
-#define ACCEL_DURATION_10MS_TICKS 200U //500->5sec
+// Fixed 0 -> 100% acceleration time in 10 ms ticks (200 = 2 s).
+#define ACCEL_DURATION_10MS_TICKS 200U
 #define CAN_ACCEL_TIME_MIN_RAW 10U
 #define CAN_ACCEL_TIME_MAX_RAW 200U
 #define CAN_ACCEL_TIME_DEFAULT_RAW 50U
