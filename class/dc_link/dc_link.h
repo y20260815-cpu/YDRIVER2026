@@ -1,7 +1,7 @@
 /*
  * dc_link.h
  *
- * DC-Link voltage-mode detection and short-circuit protection.
+ * DC-Link measurement and model voltage limits.
  */
 
 #ifndef DC_LINK_DC_LINK_H_
@@ -9,33 +9,22 @@
 
 #include "main.h"
 #include <stdint.h>
+#include "../../Core/Inc/system_setup.h"
 
 #define BATTERY_VOLTAGE_24V 24.0f
-#define BATTERY_VOLTAGE_48V 48.0f
-#define DEFAULT_BATTERY_VOLTAGE BATTERY_VOLTAGE_24V
-#define BATTERY_AUTO_SWITCH_VOLTAGE 36.0f
-#define BATTERY_24V_MIN_VOLTAGE 21.0f
-#define BATTERY_24V_MAX_VOLTAGE 30.0f
-#define BATTERY_48V_MIN_VOLTAGE 42.0f
-#define BATTERY_48V_MAX_VOLTAGE 60.0f
+#define DEFAULT_BATTERY_VOLTAGE SystemModel::NOMINAL_VOLTAGE
 
 class dc_link
 {
 private:
-	enum VoltageMode : uint8_t {
-		MODE_24V = 0,
-		MODE_48V = 1
-	};
-
-	VoltageMode voltage_mode = MODE_24V;
-	float nominal_voltage = BATTERY_VOLTAGE_24V;
-
+	float nominal_voltage = SystemModel::NOMINAL_VOLTAGE;
 public:
 	dc_link();
 	virtual ~dc_link();
 
 	void Start(float measured_input_voltage);
 	void Stop();
+	bool SetNominalVoltage(uint8_t voltage);
 
 	static float AdcToVoltage(uint16_t adc);
 	float ReadFastVoltage() const;

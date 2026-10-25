@@ -65,9 +65,9 @@ void data_class::power_on(){
 	// With SD still LOW, the motor bridge cannot draw short-circuit current.
 	float input_voltage = dc_link::AdcToVoltage(adc_buf[7]);
 	pDcLink->Start(input_voltage);
-	float detected_voltage = pDcLink->GetNominalVoltage();
-	batt.use_battery_voltage = detected_voltage;
-	batt.motor_spec_voltage = detected_voltage;
+	const float model_voltage = pDcLink->GetNominalVoltage();
+	batt.use_battery_voltage = model_voltage;
+	batt.motor_spec_voltage = model_voltage;
 	// Seed BEMF offsets from a 100-sample average while the bridge is still
 	// disabled; the one-shot runtime capture can start from a noisy sample.
 	calibrate_wcs1600_zero();
@@ -85,12 +85,8 @@ void data_class::power_on(){
 	pPWM->brake_on_flag=1;
 	HAL_GPIO_WritePin(pRY3_GPIO_Port, pRY3_Pin, GPIO_PIN_RESET);
 
-	//motor1_polarity=sysConf.motor1_polarity;
-	//motor2_polarity=sysConf.motor2_polarity;
-
-	//gamsok_idx=sysConf.brake_rate;
-	// Defaults before the first CAN frame: byte2 will override the EMB delay,
-	// acceleration stays at the fixed constant.
+	motor1_polarity = SystemModel::MOTOR1_REVERSED;
+	motor2_polarity = SystemModel::MOTOR2_REVERSED;
 	brake_delay=ELECTROMAGNETIC_BRAKE_DELAY_MS;
 	can_accel_rate = ACCEL_RATE;
 	can_accel_duration_10ms = ACCEL_DURATION_10MS_TICKS;
@@ -102,6 +98,8 @@ void data_class::power_on(){
 	// "correction PWM per full-scale error".
 	pidCONF.rpm_to_pwm_scale=1.0f/CONTROL_TARGET_MAX_RPM;
 	pidCONF.Kp=DEFAULT_PID_KP;
+	pidCONF.Ki=SystemModel::PID.Ki;
+	pidCONF.Kd=SystemModel::PID.Kd;
 
 
 	//pPWM->pid_k
@@ -754,8 +752,68 @@ float data_class::Calcu_limit(float throttle, float limit){
 //	return result;
 //}
 
+bool data_class::IsStoppedForVoltageChange() const
+{
+#if SHUNT_OC_ENABLE
+	if(pShuntOc->IsTripped()) return false;
+#endif
+	return PWR_ON_Flg && !HOLD_Emergency && !over_current_protect
+			&& !fet_temp_protect && over_current_retry_wait_10ms_cnt == 0U
+			&& motor_command_count == 0U
+			&& fabsf(active_command_pwm1) <= 0.01f && fabsf(active_command_pwm2) <= 0.01f
+			&& fabsf(currentPWM1) <= 0.01f && fabsf(currentPWM2) <= 0.01f
+			&& fabsf(inputRaw.target_pwm.f1) <= 0.01f
+			&& fabsf(inputRaw.target_pwm.f2) <= 0.01f
+			&& fabsf(pPWM->drive_pwm.f1) <= 0.01f && fabsf(pPWM->drive_pwm.f2) <= 0.01f
+			&& fabsf(pPWM->rpm.f1) <= EMB_APPLY_MAX_RPM
+			&& fabsf(pPWM->rpm.f2) <= EMB_APPLY_MAX_RPM
+			&& pPWM->brake_on_flag && !pPWM->IsElectromagneticBrakeStarting()
+			&& HAL_GPIO_ReadPin(pRY3_GPIO_Port, pRY3_Pin) == GPIO_PIN_RESET;
+}
+
 void data_class::can_process_routine()
 {
+	const uint32_t primask = __get_PRIMASK();
+	__disable_irq();
+	const CAN_SERVICE_DATA_UNIT command = vcu_sdu;
+	__set_PRIMASK(primask);
+	if(command.btn.emergency) HOLD_Emergency = 1;
+	const uint8_t voltage = command.canBattery;
+	if(voltage != 0U && voltage != 24U && voltage != 48U) {
+		printf("CAN drive rejected: unsupported voltage=%u\r\n", voltage);
+		ClearMotorCommandQueue();
+		memset(&inputRaw.io, 0, sizeof(inputRaw.io));
+		QueueMotorCommand(0.0f, 0.0f);
+		return;
+	}
+	if(voltage != 0U && voltage != pDcLink->GetNominalVoltage()) {
+		if(command.LeftMotor_velocity != 0 || command.RightMotor_velocity != 0
+				|| !IsStoppedForVoltageChange()) {
+			printf("CAN voltage change rejected: stop and apply brake before selecting %uV\r\n",
+					voltage);
+			ClearMotorCommandQueue();
+			memset(&inputRaw.io, 0, sizeof(inputRaw.io));
+			QueueMotorCommand(0.0f, 0.0f);
+			return;
+		}
+		const uint32_t voltage_primask = __get_PRIMASK();
+		__disable_irq();
+		const bool changed = pDcLink->SetNominalVoltage(voltage);
+		if(changed) {
+			batt.use_battery_voltage = pDcLink->GetNominalVoltage();
+			batt.motor_spec_voltage = batt.use_battery_voltage;
+#if SHUNT_OC_ENABLE
+			pShuntOc->RefreshVoltageThresholds();
+#endif
+		}
+		__set_PRIMASK(voltage_primask);
+		if(!changed) return;
+		printf("CAN voltage selected: %uV (RAM only)\r\n", voltage);
+	}
+	brake_delay = command.canBrakeDelay == 0U
+			? ELECTROMAGNETIC_BRAKE_DELAY_MS : command.canBrakeDelay;
+	if(brake_delay < EMB_DELAY_CAN_MIN_MS) brake_delay = EMB_DELAY_CAN_MIN_MS;
+	if(brake_delay > EMB_DELAY_CAN_MAX_MS) brake_delay = EMB_DELAY_CAN_MAX_MS;
 	// CAN motor commands (0x701 lift / 0x7C1 bangJaeCha) enter the same
 	// command FIFO as on-board input; ramp/brake processing stays identical.
 #if 0 // RX 확인용 로그 (필요 시 복원)
@@ -769,21 +827,10 @@ void data_class::can_process_routine()
 	}
 	rx_log_cnt++;
 #endif
-	// Byte2는 전자브레이크 딜레이(raw x 5 ms, 기존 brkDly 스케일)로 사용하고
-	// 가속 시간은 상수(ACCEL_DURATION_10MS_TICKS)로 고정한다.
-	{
-		uint16_t delay_ms = vcu_sdu.canBrakeDelay; // req[2] * 5
-		if(delay_ms < EMB_DELAY_CAN_MIN_MS) delay_ms = EMB_DELAY_CAN_MIN_MS;
-		if(delay_ms > EMB_DELAY_CAN_MAX_MS) delay_ms = EMB_DELAY_CAN_MAX_MS;
-		brake_delay = delay_ms;
-		can_accel_duration_10ms = ACCEL_DURATION_10MS_TICKS;
-		can_decel_rpm_per_10ms = DECEL_RPM_PER_10MS;
-	}
-	inputRaw.io.btn = vcu_sdu.btn;
-	inputRaw.io.toggle = vcu_sdu.toggle;
-	if(vcu_sdu.btn.emergency) HOLD_Emergency = 1;
-	QueueMotorCommand(vcu_sdu.LeftMotor_velocity / 1000.0f,
-			vcu_sdu.RightMotor_velocity / 1000.0f);
+	inputRaw.io.btn = command.btn;
+	inputRaw.io.toggle = command.toggle;
+	QueueMotorCommand(command.LeftMotor_velocity / 1000.0f,
+			command.RightMotor_velocity / 1000.0f);
 }
 
 LIFT_BUTTON data_class::Get_localGPIO(){
@@ -956,7 +1003,7 @@ void data_class::ten_millisec_routine()
 		force_pwm_off_for_over_current();
 		return;
 	}
-	local_lift=Get_localGPIO();//can과 상관없이 처리
+	local_lift = {};
 
 	uint8_t motor_command_tick_50ms = 0;
 	if(++motor_command_10ms_count >= 5) {
@@ -1007,8 +1054,7 @@ void data_class::ten_millisec_routine()
 	// PID feedback: keep the measured speed updated for every command source.
 	inputRaw.rpm.f1 = pPWM->rpm.f1;
 	inputRaw.rpm.f2 = pPWM->rpm.f2;
-	// Speed closed loop: PID on by default, master can disable per frame
-	// via the 0x701 btn.disablePID bit (local mode: bit is 0 -> PID on).
+	// Model disable and the CAN disablePID bit both override closed-loop control.
 	pPWM->Update_PWM(inputRaw.io.btn.disablePID,
 			inputRaw.target_pwm.f1 * fet_temp_pwm_scale,
 			inputRaw.target_pwm.f2 * fet_temp_pwm_scale);
@@ -1347,7 +1393,10 @@ void data_class::unpack7(const uint8_t in[7], int16_t &rpm1, int16_t &rpm2, uint
 
 
 void data_class::CAN_DCU_Information(){
-	CAN_UP_FLAG_DATA upFlag;
+	CAN_UP_FLAG_DATA upFlag = {};
+	const uint16_t gpio_b = (uint16_t)GPIOB->IDR;
+	const uint16_t gpio_c = (uint16_t)GPIOC->IDR;
+	const uint16_t relay_b = (uint16_t)GPIOB->ODR;
 	// 0x5B8 = CAN_From_VCU: 아성 ESP32 인터페이스와 참조 프로젝트 공통 상태 ID.
 	uint32_t Pub_ID=0x5B8;
 	uint8_t buf[8]={0,};
@@ -1378,10 +1427,17 @@ void data_class::CAN_DCU_Information(){
 	upFlag.emb_error=0;// (batt.measure_emb_resister>4.0)? 1:0;
 	upFlag.can_ready=1;
 
+#if PCB_TYPE == DM_DRIVER
+	upFlag.limitSwitch =
+			((gpio_c & pIO_CP_Pin) == 0U ? 1U : 0U) |
+			((gpio_c & pIO_CN_Pin) == 0U ? 2U : 0U);
+	upFlag.spray=pSpary;
+#else
 	if(inputRaw.io.btn.ioMsg==2){
 		upFlag.limitSwitch=local_lift.liftUPDN;//방제차-limitSwitch
 		upFlag.spray=pSpary;
 	}
+#endif
 //(4byte-32bit) 12bit+12bit+8bit  rpm1(12bit) + rpm2(12bit) + current(8bit)
 //(3byte-24bit) measure_battery_voltage(10bit)+motor_temp(7bit)+fet_temp(7bit)
 	buf[0]=pack_buf[0];
@@ -1393,6 +1449,35 @@ void data_class::CAN_DCU_Information(){
 	buf[6]=pack_buf[6];//(uint8_t)batt.fet_temp;
 	buf[7]=upFlag.u8;//sysFlag.u8;
 	pCAN->put_canTxd(Pub_ID, buf);
+
+	uint8_t io_buf[8] = {0,};
+	io_buf[0] =
+			((gpio_b & pIO_AP_Pin) == 0U ? (1U << 0) : 0U) |
+			((gpio_b & pIO_AN_Pin) == 0U ? (1U << 1) : 0U) |
+			((gpio_c & pIO_BP_Pin) == 0U ? (1U << 2) : 0U) |
+			((gpio_c & pIO_BN_Pin) == 0U ? (1U << 3) : 0U) |
+			((gpio_c & pIO_DN_EXT13_Pin) == 0U ? (1U << 7) : 0U);
+	io_buf[1] =
+			((relay_b & pRY3_Pin) != 0U ? (1U << 0) : 0U) |
+			((relay_b & pRY4_Pin) != 0U ? (1U << 1) : 0U) |
+			((relay_b & pRY5_Pin) != 0U ? (1U << 2) : 0U) |
+			((relay_b & pRY6_Pin) != 0U ? (1U << 3) : 0U) |
+			((relay_b & pRY7_Pin) != 0U ? (1U << 4) : 0U);
+#if PCB_TYPE == DM_DRIVER
+	io_buf[0] |=
+			((gpio_c & pIO_CP_Pin) == 0U ? (1U << 4) : 0U) |
+			((gpio_c & pIO_CN_Pin) == 0U ? (1U << 5) : 0U) |
+			((gpio_c & pIO_DP_Pin) == 0U ? (1U << 6) : 0U);
+	io_buf[1] |=
+			((relay_b & pWUP_Pin) != 0U ? (1U << 6) : 0U) |
+			((relay_b & pWDN_Pin) != 0U ? (1U << 7) : 0U);
+	io_buf[2] = (uint8_t)((ladcValue[0] > 4095U ? 4095U : ladcValue[0]) >> 4);
+	io_buf[3] = (uint8_t)((ladcValue[1] > 4095U ? 4095U : ladcValue[1]) >> 4);
+#else
+	io_buf[1] |= ((pRY8_GPIO_Port->ODR & pRY8_Pin) != 0U ? (1U << 5) : 0U);
+#endif
+	io_buf[4] = PCB_TYPE;
+	pCAN->put_canTxd(0x5B9U, io_buf);
 
 	/*
 	 * Relay/I/O status is published at the same 100 ms point as 0x5B8.
@@ -1675,9 +1760,9 @@ void data_class::update_error_code_once_per_second()
 {
 	float measured_voltage = batt.measure_battery_voltage;
 	float low_voltage = (pDcLink != 0)
-			? pDcLink->GetLowVoltageLimit() : BATTERY_24V_MIN_VOLTAGE;
+			? pDcLink->GetLowVoltageLimit() : SystemModel::LOW_VOLTAGE_LIMIT;
 	float over_voltage = (pDcLink != 0)
-			? pDcLink->GetHighVoltageLimit() : BATTERY_24V_MAX_VOLTAGE;
+			? pDcLink->GetHighVoltageLimit() : SystemModel::HIGH_VOLTAGE_LIMIT;
 
 	memset(&error_code,0,sizeof(ERROR_CODE_STATE));
 	error_code.low_voltage = (measured_voltage < low_voltage);
@@ -1732,16 +1817,10 @@ void data_class::display_error_code_once_per_second()
 		return;
 	}
 
-	// Normal display is the vehicle mode selected at boot. The decimal point
-	// is now exclusively a CAN-alive indicator; it no longer indicates the
-	// internally detected 24/48 V protection range.
+	// The decimal point is exclusively a CAN-alive indicator.
 	if(sysFlag.canReady) fnd_can_dot_state ^= 1U;
 	else fnd_can_dot_state = 0;
-	// PA8 fixes AS mode when fitted. On legacy AS boards without that strap,
-	// an accepted 0x701/0x7C1 frame also selects the A display. Only an
-	// accepted 0x702 frame selects F.
-	const uint8_t display_as = as_can_mode
-			|| systemControlType == AS_CONTROL
+	const uint8_t display_as = systemControlType == AS_CONTROL
 			|| systemControlType == SAMBOO_LIFT
 			|| systemControlType == SAMBOO_BANGJAE;
 	pFND595->PrintHex(display_as ? 0x0AU : 0x0FU, fnd_can_dot_state);

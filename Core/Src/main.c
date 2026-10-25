@@ -61,7 +61,6 @@ uint8_t SYSTEM_setup_data_ok=0;
 uint8_t can_process_flag=0;
 volatile uint32_t control_millis=0;
 ENUM_SYSTEM_TYPE systemControlType=NO_CAN;
-uint8_t as_can_mode=0;
 SYSTEM_CONF sysConf;
 PID_CONFIG pidCONF;
 
@@ -206,28 +205,16 @@ int main(void)
     }
   }
 
-  /* CON1 4-5 jumper strap: PA8(pin5) pulled to 3.3V(pin4) selects AS mode.
-     Pull-down keeps PA8 low when the jumper is absent. */
-  {
-    GPIO_InitTypeDef g = {0};
-    g.Pin = GPIO_PIN_8;
-    g.Mode = GPIO_MODE_INPUT;
-    g.Pull = GPIO_PULLDOWN;
-    HAL_GPIO_Init(GPIOA, &g);
-    HAL_Delay(2);
-    if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8) == GPIO_PIN_SET) {
-      as_can_mode = 1;
-      systemControlType = AS_CONTROL;
-      printf("### AS-CAN MODE (CON1 4-5 jumper detected) ###\r\n");
-    }
-  }
+  printf("### MODEL %s: CAN INPUT ONLY ###\r\n", SYSTEM_MODEL_NAME);
 
   pCAN = new tja1050();
   pDcLink = new dc_link();
   pShuntOc = new shunt_oc();
   pDataClass=new data_class();
   pPWM=new PWM16();
+#if PCB_HAS_FND
   pFND595=new FND595();
+#endif
   pFlash_mem=new stm32flash();
 //  pZIGBEE =new zigbee();
 //  pWIFI =new wifiParse();
@@ -277,10 +264,11 @@ int main(void)
 
   printf("(4) pDataClass->power_on..\r\n");
   pDataClass->power_on();
-  pDataClass->HOLD_Emergency=0;
-  // Vehicle mode is fixed by the PA8 strap at boot: A=AS, F=Follow Me.
+  // The legacy CAN source selects A/F; it does not select the model settings.
   // The decimal point is added by the 1 s task only while CAN is alive.
-  pFND595->PrintHex(as_can_mode ? 0x0AU : 0x0FU, 0);
+  if(pFND595 != 0)
+    pFND595->PrintHex(systemControlType == FM_CONTROL || systemControlType == NO_CAN
+            ? 0x0FU : 0x0AU, 0);
   //pFND595->TestOutputBits();
   /* USER CODE END 2 */
 

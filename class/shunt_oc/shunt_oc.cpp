@@ -22,15 +22,21 @@ void shunt_oc::Start()
 	tripped = 0;
 	trip_adc = 0;
 	trip_voltage = 0.0f;
+	RefreshVoltageThresholds();
+	enabled = 1;
+	ConfigureAnalogWatchdog();
+	if(HAL_ADC_Start(&hadc2) != HAL_OK)
+		Error_Handler();
+}
+
+void shunt_oc::RefreshVoltageThresholds()
+{
 	active_threshold = (pDcLink != 0 && pDcLink->Is24VMode())
 			? SHUNT_OC_THRESHOLD_24V : SHUNT_OC_THRESHOLD_48V;
 	active_voltage_threshold = (pDcLink != 0 && pDcLink->Is24VMode())
 			? SHUNT_OC_DC_LINK_THRESHOLD_24V
 			: SHUNT_OC_DC_LINK_THRESHOLD_48V;
-	enabled = 1;
-	ConfigureAnalogWatchdog();
-	if(HAL_ADC_Start(&hadc2) != HAL_OK)
-		Error_Handler();
+	if(enabled && !tripped) ConfigureAnalogWatchdog();
 }
 
 void shunt_oc::Stop()

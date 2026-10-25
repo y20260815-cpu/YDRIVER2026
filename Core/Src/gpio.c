@@ -22,6 +22,7 @@
 #include "gpio.h"
 
 /* USER CODE BEGIN 0 */
+#include "system_setup.h"
 
 /* USER CODE END 0 */
 
@@ -51,7 +52,9 @@ void MX_GPIO_Init(void)
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
+#if PCB_HAS_FND
   HAL_GPIO_WritePin(GPIOC, pFND_SDAT_Pin|pFND_SCLK_Pin|pFND_LATCH_Pin, GPIO_PIN_SET);
+#endif
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, pWUP_Pin|pWDN_Pin|pSD_Pin|pRY2_Pin
@@ -63,16 +66,21 @@ void MX_GPIO_Init(void)
 
   /*Configure GPIO pins : pIO_BP_Pin pIO_BN_Pin */
   GPIO_InitStruct.Pin = pIO_BP_Pin|pIO_BN_Pin;
+#if PCB_TYPE == DM_DRIVER
+  GPIO_InitStruct.Pin |= pIO_CP_Pin|pIO_CN_Pin|pIO_DP_Pin;
+#endif
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pins : pFND_SDAT_Pin pFND_SCLK_Pin pFND_LATCH_Pin */
+#if PCB_HAS_FND
   GPIO_InitStruct.Pin = pFND_SDAT_Pin|pFND_SCLK_Pin|pFND_LATCH_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+#endif
 
   /*Configure GPIO pin : pIO_DN_EXT13_Pin */
   GPIO_InitStruct.Pin = pIO_DN_EXT13_Pin;
@@ -108,6 +116,17 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(pRY1_GPIO_Port, &GPIO_InitStruct);
+
+#if PCB_TYPE == FND_DRIVER
+  __HAL_RCC_AFIO_CLK_ENABLE();
+  __HAL_AFIO_REMAP_PD01_ENABLE();
+  HAL_GPIO_WritePin(pRY8_GPIO_Port, pRY8_Pin, GPIO_PIN_RESET);
+  GPIO_InitStruct.Pin = pRY8_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(pRY8_GPIO_Port, &GPIO_InitStruct);
+#endif
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI3_IRQn, 0, 0);

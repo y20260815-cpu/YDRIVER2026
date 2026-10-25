@@ -174,7 +174,6 @@ extern uint16_t rpm;
 extern PID_CONFIG pidCONF;
 extern ENUM_SYSTEM_TYPE systemControlType;
 extern uint8_t can_process_flag;
-extern uint8_t as_can_mode;
 extern volatile uint32_t control_millis;
 //extern uint8_t rxBuffer[RX_BUFFER_SIZE];
 

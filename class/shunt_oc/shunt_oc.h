@@ -41,6 +41,7 @@ public:
 
 	void Start();
 	void Stop();
+	void RefreshVoltageThresholds();
 	void HandleAnalogWatchdog(ADC_HandleTypeDef *hadc);
 
 	uint8_t IsTripped() const;

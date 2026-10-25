@@ -8,6 +8,7 @@
 #ifndef DATA_CLASS_DATACLASS_H_
 #define DATA_CLASS_DATACLASS_H_
 #include <stdint.h>
+#include "../../Core/Inc/system_setup.h"
 
 #define STABILIZE_DELAY_10MS_TICK 10
 // 0.02 gave 0->100% in ~1 s (harsh launch); 0.012 stretches it to ~1.7 s.
@@ -24,20 +25,13 @@
 #endif
 
 #define ACCEL_RATE 0.012f
-// Deceleration is configured by stopping distance instead of ramp time so
-// the setting stays intuitive. Linear ramp from full speed: d = v*T/2, so
-// T = 2*d/v. Default 0.75 m at 1 m/s gives a 1.5 s full-speed ramp
-// (10 rpm/10ms in CONTROL_TARGET_MAX_RPM units).
-#define STOP_DISTANCE_M 0.75f
-#define DECEL_RAMP_TIME_S (2.0f * STOP_DISTANCE_M / VEHICLE_SPEED_AT_MAX_RPM_MPS)
-// Target-speed reduction per 10 ms, derived from the stopping distance.
+#define DECEL_RAMP_TIME_S (SystemModel::DECEL_MS / 1000.0f)
+// Target-speed reduction per 10 ms from the model's full-scale ramp time.
 #define DECEL_RPM_PER_10MS (CONTROL_TARGET_MAX_RPM * 0.01f / DECEL_RAMP_TIME_S)
-// AS(0x701)/FM(0x702) byte2 is the electromagnetic-brake delay (raw x 5 ms,
-// legacy brkDly scale). Byte3 retains the battery-setting meaning.
-// Acceleration no longer comes from CAN; it is the fixed constant below.
+// Legacy frame fields are retained for diagnostics, not model configuration.
 #define CAN_ACCEL_TIME_REF 300.0f
 // Fixed 0 -> 100% acceleration time in 10 ms ticks (200 = 2 s).
-#define ACCEL_DURATION_10MS_TICKS 200U
+#define ACCEL_DURATION_10MS_TICKS (SystemModel::ACCEL_MS / 10U)
 #define CAN_ACCEL_TIME_MIN_RAW 10U
 #define CAN_ACCEL_TIME_MAX_RAW 200U
 #define CAN_ACCEL_TIME_DEFAULT_RAW 50U
@@ -53,12 +47,10 @@
 // Keep a small controlled ramp at the voltage hold threshold so a neutral
 // command cannot leave a permanent non-zero drive PWM.
 #define DECEL_VDC_MIN_SCALE 0.10f
-// Fixed delay before the electromagnetic brake is applied after PWM stops.
-// Unit: milliseconds. Change this single value to retune the delay.
-#define ELECTROMAGNETIC_BRAKE_DELAY_MS 300U
-#define DEFAULT_PID_KP 0.8f
+#define ELECTROMAGNETIC_BRAKE_DELAY_MS SystemModel::BRAKE_DELAY_MS
+#define DEFAULT_PID_KP SystemModel::PID.Kp
 
-#define MAX_CURRENT 80.0f //MAX CURRENT //2.0f test
+#define MAX_CURRENT SystemModel::CURRENT_LIMIT_A
 #define LIMIT_FET_TEMP 85
 #define LIMIT_MOTOR_TEMP 85
 #define FET_TEMP_DERATE_START 85
@@ -198,6 +190,7 @@ private:
 	void ProcessMotorCommandQueue();
 	void UpdateMotorCommandOutput();
 	void ClearMotorCommandQueue();
+	bool IsStoppedForVoltageChange() const;
 	//void Get_IO_PARM();
 	POSITION_ANGLE Detect_Change_evt(uint8_t toggle_jenhujin, uint8_t botton_LR);
 	float Calcu_limit(float throttle, float limit);
@@ -216,15 +209,15 @@ public:
 	//CONF_CHUNK config_table;
 	//uint16_t brake_delay_timeout=10;
 	//uint8_t brake_delay_flag=1;
-	uint16_t brake_delay;
+	uint16_t brake_delay = ELECTROMAGNETIC_BRAKE_DELAY_MS;
 	//uint16_t gamsok_idx;//=setup_data.conf2.brake_rate;
-	// CAN으로 조정되는 램프 계수 (로컬 모드는 기본값 유지)
+	// Fixed model ramp values; legacy member names are retained.
 	float can_accel_rate = ACCEL_RATE;
-	uint16_t can_accel_duration_10ms = CAN_ACCEL_TIME_DEFAULT_RAW * 10U;
+	uint16_t can_accel_duration_10ms = ACCEL_DURATION_10MS_TICKS;
 	float can_decel_rpm_per_10ms = DECEL_RPM_PER_10MS;
 
-	uint8_t motor1_polarity;
-	uint8_t motor2_polarity;
+	uint8_t motor1_polarity = SystemModel::MOTOR1_REVERSED;
+	uint8_t motor2_polarity = SystemModel::MOTOR2_REVERSED;
 
 	MAIN_MAIN gMAIN;
 	BIT_SYSTEM_FLAG sysFlag;

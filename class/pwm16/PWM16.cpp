@@ -72,8 +72,9 @@ PWM16::PWM16()
 {
 	// TODO Auto-generated constructor stub
 	PWM16_START();
-	pidCONF.Ki=0.1f;
-	pidCONF.Kd=0.1f;
+	pidCONF.Kp=SystemModel::PID.Kp;
+	pidCONF.Ki=SystemModel::PID.Ki;
+	pidCONF.Kd=SystemModel::PID.Kd;
 	integral1=integral2=0;
 	m1_value=0.0f;
 	m2_value=0.0f;  // 초기화 추가
@@ -96,7 +97,8 @@ PWM16::~PWM16()
 
 void PWM16::PWM16_START()
 {
-
+	HAL_GPIO_WritePin(pSD_GPIO_Port, pSD_Pin, GPIO_PIN_RESET);
+	DisableAllFETs_Dual();
 	HAL_TIM_PWM_Start(&htim3,TIM_CHANNEL_1);
 	HAL_TIM_PWM_Start(&htim3,TIM_CHANNEL_2);
 	HAL_TIM_PWM_Start(&htim3,TIM_CHANNEL_3);
@@ -106,8 +108,6 @@ void PWM16::PWM16_START()
 	HAL_TIM_PWM_Start(&htim2,TIM_CHANNEL_2);
 	HAL_TIM_PWM_Start(&htim2,TIM_CHANNEL_3);
 	HAL_TIM_PWM_Start(&htim2,TIM_CHANNEL_4);
-	//PWM_Enable(1);
-	HAL_GPIO_WritePin(pSD_GPIO_Port, pSD_Pin, GPIO_PIN_SET);
 }
 
 
@@ -772,6 +772,7 @@ DoubleF_VALUE PWM16::pidCalibration(uint8_t disable_pid, DoubleF_VALUE input, Do
 
 void PWM16::Update_PWM(uint8_t disable_pid, float target_pwm1, float target_pwm2)
 {
+	disable_pid = (disable_pid != 0U || SystemModel::PID.disable) ? 1U : 0U;
 	MOTOR_DIRECTION md_polarity;
 	DoubleF_VALUE set_pwm;
     DoubleF_VALUE raw_target_pwm;

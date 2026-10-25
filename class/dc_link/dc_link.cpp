@@ -1,7 +1,7 @@
 /*
  * dc_link.cpp
  *
- * DC-Link voltage-mode detection and short-circuit protection.
+ * DC-Link measurement and model voltage limits.
  */
 
 #include "extern.h"
@@ -29,10 +29,19 @@ float dc_link::ReadFastVoltage() const
 
 void dc_link::Start(float measured_input_voltage)
 {
-	voltage_mode = (measured_input_voltage >= BATTERY_AUTO_SWITCH_VOLTAGE)
-			? MODE_48V : MODE_24V;
-	nominal_voltage = (voltage_mode == MODE_48V)
-			? BATTERY_VOLTAGE_48V : BATTERY_VOLTAGE_24V;
+	nominal_voltage = SystemModel::NOMINAL_VOLTAGE;
+	printf("MODEL %s: default voltage=%.1fV, measured DC-Link=%.1fV\r\n",
+			SYSTEM_MODEL_NAME, SystemModel::NOMINAL_VOLTAGE, measured_input_voltage);
+}
+
+bool dc_link::SetNominalVoltage(uint8_t voltage)
+{
+	if(voltage != 24U && voltage != 48U) {
+		printf("DC-Link: unsupported voltage command=%u\r\n", voltage);
+		return false;
+	}
+	nominal_voltage = static_cast<float>(voltage);
+	return true;
 }
 
 void dc_link::Stop()
@@ -46,17 +55,15 @@ float dc_link::GetNominalVoltage() const
 
 float dc_link::GetLowVoltageLimit() const
 {
-	return (voltage_mode == MODE_48V)
-			? BATTERY_48V_MIN_VOLTAGE : BATTERY_24V_MIN_VOLTAGE;
+	return Is24VMode() ? SystemModel::LOW_VOLTAGE_LIMIT : 42.0f;
 }
 
 float dc_link::GetHighVoltageLimit() const
 {
-	return (voltage_mode == MODE_48V)
-			? BATTERY_48V_MAX_VOLTAGE : BATTERY_24V_MAX_VOLTAGE;
+	return Is24VMode() ? SystemModel::HIGH_VOLTAGE_LIMIT : 60.0f;
 }
 
 uint8_t dc_link::Is24VMode() const
 {
-	return voltage_mode == MODE_24V;
+	return nominal_voltage == BATTERY_VOLTAGE_24V;
 }

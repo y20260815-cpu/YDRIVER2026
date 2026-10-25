@@ -65,6 +65,12 @@ void Error_Handler(void);
 #define pFND_SCLK_GPIO_Port GPIOC
 #define pFND_LATCH_Pin GPIO_PIN_2
 #define pFND_LATCH_GPIO_Port GPIOC
+#define pIO_CP_Pin GPIO_PIN_0
+#define pIO_CP_GPIO_Port GPIOC
+#define pIO_CN_Pin GPIO_PIN_1
+#define pIO_CN_GPIO_Port GPIOC
+#define pIO_DP_Pin GPIO_PIN_2
+#define pIO_DP_GPIO_Port GPIOC
 #define pIO_DN_EXT13_Pin GPIO_PIN_3
 #define pIO_DN_EXT13_GPIO_Port GPIOC
 #define pIO_DN_EXT13_EXTI_IRQn EXTI3_IRQn
@@ -100,6 +106,9 @@ void Error_Handler(void);
 #define pRY7_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
+
+#define pRY8_Pin GPIO_PIN_0
+#define pRY8_GPIO_Port GPIOD
 
 /* USER CODE END Private defines */
 

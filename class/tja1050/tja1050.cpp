@@ -231,17 +231,17 @@ void tja1050::HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *CanHandle)
   }
 
   else if(RxHeader.StdId==CAN_ID_AS_DRIVE){
-	  if(RxHeader.DLC != CAN_DRIVE_DLC) return;
+	  if(RxHeader.IDE != CAN_ID_STD || RxHeader.RTR != CAN_RTR_DATA
+			  || RxHeader.DLC != CAN_DRIVE_DLC) return;
 	  can_TimeOut=CAN_ALIVE_TIMEOUT;
 	  can_exist=1;
 	  pDataClass->system_start_flag=1;
-	  if(!as_can_mode) systemControlType=SAMBOO_LIFT;
+	  systemControlType=SAMBOO_LIFT;
 	  CAN_Request_EVT(RxData);
   }
   else if(RxHeader.StdId==CAN_ID_FM_DRIVE){
-	  // The AS hardware selection owns the motor command path.  Ignoring FM
-	  // drive frames here prevents two controllers from commanding the motors.
-	  if(as_can_mode || RxHeader.DLC != CAN_DRIVE_DLC) return;
+	  if(RxHeader.IDE != CAN_ID_STD || RxHeader.RTR != CAN_RTR_DATA
+			  || RxHeader.DLC != CAN_DRIVE_DLC) return;
 	  can_TimeOut=CAN_ALIVE_TIMEOUT;
 	  can_exist=1;
 	  pDataClass->system_start_flag=1;
@@ -250,15 +250,15 @@ void tja1050::HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *CanHandle)
   }
   else if(RxHeader.StdId==CAN_ID_ESTOP){
 	  // E-STOP is common and has priority in every operating mode.
-	  if(RxHeader.DLC == CAN_ESTOP_DLC && RxData[0] == CAN_ESTOP_VALUE) {
+	  if(RxHeader.IDE == CAN_ID_STD && RxHeader.RTR == CAN_RTR_DATA
+			  && RxHeader.DLC == CAN_ESTOP_DLC && RxData[0] == CAN_ESTOP_VALUE) {
 		  pDataClass->HOLD_Emergency = 1;
 	  }
   }
   else if(RxHeader.StdId==0x7C1)//bangJaeCha
   {
-	  // AS mode is jumper-fixed; do not let bus traffic switch the profile.
-	  if(as_can_mode) return;
-	  if(RxHeader.DLC != CAN_DRIVE_DLC) return;
+	  if(RxHeader.IDE != CAN_ID_STD || RxHeader.RTR != CAN_RTR_DATA
+			  || RxHeader.DLC != CAN_DRIVE_DLC) return;
 	  can_TimeOut=CAN_ALIVE_TIMEOUT;
 	  can_exist=1;
 	  pDataClass->system_start_flag=1;

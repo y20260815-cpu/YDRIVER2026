@@ -49,7 +49,7 @@
   <ol>
     <li><a href="#overview">시스템 개요</a></li>
     <li><a href="#hw">하드웨어 구성</a></li>
-    <li><a href="#con1">U1_CON1 / AS 점퍼</a></li>
+    <li><a href="#con1">U1_CON1 / 모델 선택</a></li>
     <li><a href="#modes">동작 모드</a></li>
     <li><a href="#power">전원 투입 시퀀스</a></li>
     <li><a href="#can">CAN 통신 사양</a></li>
@@ -78,7 +78,7 @@
   <tr><th>항목</th><th>내용</th></tr>
   <tr><td>MCU</td><td>STM32F103RBT6 / RCT6 (LQFP64), 내부 RC(HSI) 기반 36MHz</td></tr>
   <tr><td>모터 출력</td><td>2채널 H-브리지 PWM (TIM2/TIM3), BEMF 기반 RPM 추정 + PID</td></tr>
-  <tr><td>배터리</td><td>24V / 48V 자동 감지 (DC-Link 전압 기반, 보호 임계값 자동 설정)</td></tr>
+  <tr><td>배터리</td><td>STM32_SB100D_BJ 기본24V. 상위 명령으로 정지 중24/48V 선택 가능, 자동 전압 전환 없음</td></tr>
   <tr><td>CAN</td><td>500 kbps, 트랜시버 SN65HVD232(3.3V)</td></tr>
   <tr><td>표시</td><td>1자리 FND (74HC595 구동, 에러코드/FNR 상태)</td></tr>
   <tr><td>워치독</td><td>IWDG 약 12.8초</td></tr>
@@ -110,42 +110,59 @@
   <tr><td>FNR2 입력</td><td>PC13(BP) / PC12(BN)</td><td>〃</td></tr>
   <tr><td>브리지 SD</td><td>PB2</td><td>Low=FET 전체 차단</td></tr>
   <tr><td>FND</td><td>PC0(SDAT)/PC1(SCLK)/PC2(LATCH)</td><td>74HC595</td></tr>
-  <tr><td>AS 모드 스트랩</td><td>PA8</td><td>CON1 5번, 3.5절 참조</td></tr>
+  <tr><td>미사용 점퍼</td><td>PA8</td><td>모델/제어 방식 선택에 사용하지 않음</td></tr>
 </table>
 
-<h2 id="con1">3. U1_CON1 커넥터 / AS 모드 점퍼</h2>
+<h2 id="con1">3. U1_CON1 커넥터 / 모델 선택</h2>
 <table>
   <tr><th>CON1 핀</th><th>연결</th><th>용도</th></tr>
   <tr><td>1</td><td>U1RX (PA10)</td><td rowspan="3">데이터 수집용 UART (115200 bps 로그 출력)</td></tr>
   <tr><td>2</td><td>U1TX (PA9)</td></tr>
   <tr><td>3</td><td>GND</td></tr>
-  <tr><td>4</td><td>+3.3V</td><td rowspan="2"><strong>4-5 점퍼 단락 = AS(아성) 모드 고정</strong></td></tr>
+  <tr><td>4</td><td>+3.3V</td><td rowspan="2">4-5 점퍼 미사용</td></tr>
   <tr><td>5</td><td>PA8</td></tr>
 </table>
 <div class="info">
-<strong>AS 모드 점퍼 동작:</strong> 부팅 시 PA8을 풀다운 입력으로 판독합니다.
-4-5번이 점퍼로 단락되어 있으면 PA8=High가 되어 <code>AS-CAN 모드</code>로 고정 진입하며,
-UART에 <code>### AS-CAN MODE (CON1 4-5 jumper detected) ###</code>가 출력됩니다.
-점퍼가 없으면 기존 자동 구분 모드로 동작합니다.
+<strong>모델 선택:</strong> <code>Core/Inc/system_setup.h</code>의
+<code>SYSTEM_MODEL_NAME "STM32_SB100D_BJ"</code>를 사용합니다.
+고정 설정은 <code>class/STM32_SB100D_BJ/STM32_SB100D_BJ.h</code>의 동명 클래스가 정의합니다.
+현재 지원 모델은 STM32_SB100D_BJ 하나이며 다른 모델명을 지정하면 컴파일 오류입니다.
+다른 모델을 지원하려면 전용 클래스와 선택 코드를 함께 추가해야 합니다.
+기본값은 빌드에 포함되며 NVS를 사용하지 않습니다. 브레이크 지연·전압은 상위 CAN 명령으로 RAM에서 변경할 수 있습니다. PA8은 판독하지 않습니다.
 </div>
+<table>
+  <tr><th>모델 고정 항목</th><th>STM32_SB100D_BJ 값</th></tr>
+  <tr><td>입력 방식</td><td>부팅부터 CAN 전용. CAN 미수신/두절 시 정지 유지, 로컬 주행·로컬 부가장치 입력 미사용</td></tr>
+  <tr><td>가속 / 감속</td><td>2000ms / 3000ms (선형 전체 크기 기준, 감속은 DC-Link 보호로 늘어날 수 있음)</td></tr>
+  <tr><td>전자브레이크 딜레이</td><td>기본300ms, CAN Byte2로 변경 가능</td></tr>
+  <tr><td>PI 상수</td><td>Kp=0.8, Ki=0.1, Kd=0 (D항 미사용). 기존 CAN disablePID 비트는 유지</td></tr>
+  <tr><td>사용전압 / 저전압·과전압 표시 기준</td><td>기본24V:21/30V. 명시적48V 선택 시42/60V. 측정 전압으로 자동 전환하지 않음</td></tr>
+  <tr><td>홀 센서 전류제한</td><td>120A. 기존 션트 단락·온도 보호는 별도로 유지</td></tr>
+  <tr><td>모터1 / 모터2 방향</td><td>정상 / 정상</td></tr>
+</table>
+<p>모델 설정값과 <code>SYSTEM_MODEL_NAME</code>은 모델명이 포함된 BIN 파일과 동일한 빌드에서 사용됩니다.
+기본값 변경 후 재빌드·플래시가 필요합니다. 48V 사용 전 보드·모터 정격과 보호 기준을 검증하십시오.
+120A 한계값의 적합성은 실제 보드·배선·센서 및 모터 사양에 맞춰 검증해야 합니다.</p>
 
 <h2 id="modes">4. 동작 모드</h2>
 <table>
   <tr><th>모드</th><th>진입 조건</th><th>모터 명령 소스</th><th>부가 GPIO</th><th>CAN 두절 시</th></tr>
-  <tr><td>로컬</td><td>CAN 미수신 (기본)</td><td>FNR 레버 + 스로틀 ADC</td><td>리프트 GPIO</td><td>-</td></tr>
-  <tr><td>리프트 (CAN)</td><td>0x701 수신</td><td>CAN 속도 명령</td><td>리프트/캐스트 밸브</td><td>약 300ms 후 로컬 복귀</td></tr>
-  <tr><td>방제차 (CAN)</td><td>0x7C1 수신</td><td>CAN 속도 명령</td><td>스프레이(pRY4)</td><td>약 300ms 후 로컬 복귀, 스프레이 OFF</td></tr>
-  <tr><td><strong>AS (아성)</strong></td><td><strong>CON1 4-5 점퍼</strong></td><td>CAN 속도 명령 (0x701)</td><td>리프트 GPIO</td><td><strong>정지 유지 (로컬 폴백 금지)</strong>, 0x7C1 무시</td></tr>
+  <tr><td>CAN 대기</td><td>전원 ON부터 고정</td><td>미수신 시 정지</td><td>로컬 입력 미사용</td><td>정지 유지</td></tr>
+  <tr><td>리프트/AS 호환 명령</td><td>0x701 수신</td><td>CAN 속도 명령</td><td>기존 ioMsg에 따른 제어</td><td>약 300ms 후 정지, 버튼/토글 클리어</td></tr>
+  <tr><td>방제차 호환 명령</td><td>0x7C1 수신</td><td>CAN 속도 명령</td><td>기존 ioMsg에 따른 제어</td><td>약 300ms 후 정지, 버튼/토글 클리어</td></tr>
+  <tr><td>FM 호환 명령</td><td>0x702 수신</td><td>CAN 속도 명령</td><td>기존 ioMsg에 따른 제어</td><td>약 300ms 후 정지, 버튼/토글 클리어</td></tr>
 </table>
-<div class="note">CAN 수신 중에는 로컬 FNR 레버 입력이 무시되며, CAN이 <strong>300ms(30틱)</strong> 이상 끊기면
-일반 모드는 로컬 입력으로 자동 복귀합니다. 전환 시 마지막 CAN 버튼/토글 상태(스프레이 등)는 자동 클리어됩니다.</div>
+<div class="note">모델은 부팅부터 CAN 전용입니다. CAN이 <strong>300ms(30틱)</strong> 이상 끊기면 정지 명령을 유지하고
+마지막 CAN 버튼/토글을 클리어합니다. 로컬 입력으로 전환하지 않습니다.
+기존 CAN ID에 따른 systemControlType과 A/F 표시는 호환용이며 모델 고정 설정을 바꾸지 않습니다.
+여러 제어기가 주행 ID를 혼용하지 않도록 구성하십시오.</div>
 
 <h2 id="power">5. 전원 투입 시퀀스 (DC-Link)</h2>
 <ol>
-  <li>부팅 → 전체 릴레이 OFF, AS 점퍼 판독</li>
+  <li>부팅 → 모델 선택 확인, 전체 릴레이 OFF, CAN 전용 대기 (PA8 미사용)</li>
   <li><strong>MC2(프리차지) ON</strong> → 1초 대기 (DC-Link 커패시터 충전)</li>
   <li><strong>MC1(메인) ON</strong> → 0.5초 대기 (스위칭 과도 안정화)</li>
-  <li>DC-Link 전압 측정 → 24V/48V 모드 자동 감지, 보호 임계값 설정</li>
+  <li>DC-Link 전압 측정 → 모델 고정 24V와 측정값 로그, 24V 보호 기준 사용</li>
   <li>션트 과전류 보호(ADC2 아날로그 워치독) 활성화</li>
   <li>SD(브리지 인에이블) High → 구동 준비 완료, FND에 0 표시</li>
 </ol>
@@ -167,26 +184,33 @@ UART에 <code>### AS-CAN MODE (CON1 4-5 jumper detected) ###</code>가 출력됩
 <h3>7.0 수신 프레임 종류 (마스터 → ydriver)</h3>
 <table>
   <tr><th>CAN ID</th><th>이름</th><th>송신 주체</th><th>처리</th></tr>
-  <tr><td><strong>0x701</strong></td><td>주행 명령 (EVT)</td><td>리프트 VCU / 아성 ESP32</td><td>모터 명령 큐 투입, 타입=리프트 (AS 모드에서는 AS 유지)</td></tr>
-  <tr><td><strong>0x7C1</strong></td><td>주행 명령 (EVT)</td><td>방제차 VCU</td><td>동일 처리, 타입=방제차 (<strong>AS 모드에서는 무시</strong>)</td></tr>
+  <tr><td><strong>0x701</strong></td><td>주행 명령 (EVT)</td><td>리프트 VCU / 아성 ESP32</td><td>기존 명령 큐, 표시용 타입=리프트, 모델 설정 유지</td></tr>
+  <tr><td><strong>0x702</strong></td><td>주행 명령 (EVT)</td><td>FM 제어기</td><td>기존 명령 큐, 표시용 타입=FM, 모델 설정 유지</td></tr>
+  <tr><td><strong>0x7C1</strong></td><td>주행 명령 (EVT)</td><td>방제차 VCU</td><td>기존 명령 큐, 표시용 타입=방제차, 모델 설정 유지</td></tr>
   <tr><td>0x700</td><td>설정 읽기 요청</td><td>설정 툴</td><td>미지원 (무시 로그)</td></tr>
   <tr><td>0x708~0x70C</td><td>설정 저장</td><td>설정 툴</td><td>미지원 (무시 로그)</td></tr>
 </table>
-<div class="note">유효 프레임 수신 시마다 alive 타이머가 갱신되며, <strong>300ms 무수신 시 CAN 모드 해제</strong>
-(일반 모드: 로컬 입력 복귀 / AS 모드: 정지 유지)됩니다.</div>
+<div class="note">표준 DATA/DLC8의 유효 주행 프레임이 alive 타이머를 갱신합니다.
+<strong>300ms 무수신 시 정지 유지</strong>하며 모델 설정과 CAN 전용 정책은 바뀌지 않습니다.</div>
 
 <h3>7.1 수신: 주행 명령 (0x701 리프트·AS / 0x7C1 방제차, DLC=8)</h3>
 <table>
   <tr><th>바이트</th><th>필드</th><th>형식</th><th>범위/단위</th><th>드라이버 내 사용</th></tr>
   <tr><td>0~1</td><td>좌측 모터 속도</td><td>int16 ([0]=상위)</td><td>-1000 ~ +1000</td><td>÷1000 → PWM -100% ~ +100%</td></tr>
-  <tr><td>2</td><td><strong>전자브레이크 지연</strong></td><td>uint8</td><td>수신값 × 5ms, 50~1275ms 제한</td><td>가속시간으로 사용하지 않음. 전자브레이크 동작 지연값으로 사용</td></tr>
-  <tr><td>3</td><td><strong>배터리 설정</strong></td><td>uint8</td><td>상위 제어기 설정값</td><td>기존 배터리 설정 의미를 유지하며 PWM 감속시간으로 사용하지 않음</td></tr>
+  <tr><td>2</td><td>전자브레이크 지연</td><td>uint8</td><td>0=모델 기본300ms, 1~255=값×5ms, 50~1275ms로 제한</td><td>매 유효 명령에 적용</td></tr>
+  <tr><td>3</td><td>사용전압 선택</td><td>uint8</td><td>0=현재값 유지,24=24V,48=48V. 그 외 오류</td><td>변경은 정지·브레이크 체결 상태에서만 허용</td></tr>
   <tr><td>4~5</td><td>우측 모터 속도</td><td>int16 ([4]=상위)</td><td>-1000 ~ +1000</td><td>÷1000 → PWM</td></tr>
   <tr><td>6</td><td>토글 (MY_TOGGLE)</td><td>비트필드</td><td>7.1.1 참조</td><td><code>inputRaw.io.toggle</code></td></tr>
   <tr><td>7</td><td>버튼 (MY_BUTTON)</td><td>비트필드</td><td>7.1.2 참조</td><td><code>inputRaw.io.btn</code></td></tr>
 </table>
 
 <h3>7.1.1 바이트 6 — MY_TOGGLE 비트 정의</h3>
+<div class="note">전압이 현재값과 다르면 해당 프레임의 좌우 속도도0이어야 하며, 명령 큐가 비어 있고
+명령·출력 PWM이 정지 범위이며 양 모터50rpm 이하, 전자브레이크 체결·시동 시퀀스 미진행·보호 오류 없음 상태여야 합니다.
+변경 시 BEMF 환산 전압, 저전압·과전압 표시 기준 및 활성 션트 보호 임계값을 함께 갱신합니다.
+션트 트립 래치는 해제하지 않습니다. 거부된 전압 명령은 UART1에 기록하고 명령 큐·버튼을 비운 뒤 정지를 요청합니다.
+전압·브레이크 변경은 RAM에만 유지되며 재부팅 시 모델 기본값으로 복원합니다.
+CAN 두절 시 브레이크는 기본300ms로 돌아가지만 선택 전압은 유지합니다.</div>
 <table>
   <tr><th>비트</th><th>필드</th><th>의미</th></tr>
   <tr><td>0~1</td><td><code>jenhujin</code></td><td>전후진 키 (0=중립)</td></tr>
@@ -202,7 +226,7 @@ UART에 <code>### AS-CAN MODE (CON1 4-5 jumper detected) ###</code>가 출력됩
   <tr><td>0~1</td><td><code>ioMsg</code></td><td><strong>부가장치 프로파일</strong>: 0=리프트/캐스트 GPIO, 2=방제 스프레이</td></tr>
   <tr><td>2~3</td><td><code>lift_Xud</code></td><td>리프트 상승/하강 (1=UP, 2=DN)</td></tr>
   <tr><td>4~5</td><td><code>castUPDN</code></td><td>캐스트 상승/하강 (1=UP, 2=DN)</td></tr>
-  <tr><td>6</td><td><code>disablePID</code></td><td>PID 비활성 (현재 미사용)</td></tr>
+  <tr><td>6</td><td><code>disablePID</code></td><td>PI 비활성 허용. PI 상수 자체는 모델 클래스 고정</td></tr>
   <tr><td>7</td><td><code>emergency</code></td><td><strong>비상정지</strong> — 1 수신 시 즉시 <code>power_off</code> (전 릴레이 개방)</td></tr>
 </table>
 
@@ -213,8 +237,8 @@ UART에 <code>### AS-CAN MODE (CON1 4-5 jumper detected) ###</code>가 출력됩
       ├ 속도      → 명령 FIFO (50ms 소비, 램프/제동 공통 처리)
       ├ toggle/btn → inputRaw.io (리프트/스프레이 GPIO 제어)
       ├ emergency → HOLD_Emergency → power_off
-      ├ 전자브레이크 지연(byte2) → 5ms 단위 지연값, byte3 → 배터리 설정
-      └ alive 타이머 갱신 (300ms 두절 시 inputRaw.io 및 제어 기본값 복원)
+      ├ byte2 → 브레이크 지연, byte3 → 정지 중 전압 선택 (0=유지)
+      └ alive 타이머 갱신 (300ms 두절 시 inputRaw.io 클리어, 모델 설정으로 정지)
 </pre>
 
 <h3>7.2 송신: VCU 상태 (0x5B8, 100ms 주기, DLC=8)</h3>
@@ -226,19 +250,49 @@ UART에 <code>### AS-CAN MODE (CON1 4-5 jumper detected) ###</code>가 출력됩
   <tr><td>7</td><td>상태 플래그</td><td>bisang(비상), emb, emb_error, can_ready, limitSwitch, spray</td></tr>
 </table>
 <div class="info">아성 ESP32 인터페이스는 이 0x5B8 프레임을 수신하여 LCD에 전압·속도·온도를 표시합니다.</div>
+<p><code>DM_DRIVER</code>에서는 삼부 LCD(<code>ycb_samboo_auto_lcd</code>) 호환을 위해
+Byte7 bit5에 C+(PC0, 충돌), bit6에 C−(PC1, 호스) 상태를 전송합니다.
+LOW=활성이며 <code>limitSwitch</code> 값은 0=미감지, 1=C+만 감지, 2=C−만 감지, 3=동시 감지입니다.
+주행 명령의 <code>ioMsg</code>와 무관하게 갱신하며, 상위 LCD 소스 수정 없이 기존 수신 필드를 사용합니다.
+입력에 따른 정지 판단은 상위에서만 수행합니다.</p>
 
 <h3>7.3 설정 프로토콜 (미지원)</h3>
 <p>0x700(설정 요청) / 0x708~0x70C(저장) / 0x5B0~0x5B7(응답) 프로토콜은 수신은 되나
 <strong>본 펌웨어에서는 비활성화</strong> 상태입니다(SYSTEM_CONF 미사용). 해당 프레임 수신 시 무시 로그만 출력합니다.</p>
 
+<h3>7.4 PCB별 입력·릴레이 상태 (0x5B9, 100ms 주기, DLC=8)</h3>
+<p>주행 CAN 연결이 활성 상태일 때 0x5B8 직후 연속 전송합니다. 기존 0x5A1을 대체하며 0x5A0은 유지합니다.</p>
+<p><code>Core/Inc/system_setup.h</code>의 <code>PCB_TYPE</code> 기본값은 <code>DM_DRIVER</code>입니다.
+이 타입은 FND를 초기화하거나 사용하지 않으며, 참조 프로젝트와 동일하게
+C+=PC0, C−=PC1, D+=PC2, D−=PC3를 Pull-up 입력으로 사용합니다.
+D−의 상승 에지 EXTI 설정은 참조 프로젝트와 동일하게 유지합니다.
+기존 FND 보드는 <code>FND_DRIVER</code>로 선택합니다.
+FND_DRIVER의 RY8은 PD0이며 HSI를 사용하는 LQFP64 보드에서 PD0/PD1 리맵 후 LOW 출력으로 초기화합니다.
+DM_DRIVER에서는 PD0를 초기화하거나 읽지 않습니다. RY8 제어 명령은 추가하지 않습니다.</p>
+<table>
+  <tr><th>바이트</th><th>DM_DRIVER</th><th>FND_DRIVER</th></tr>
+  <tr><td>0</td><td>bit0~7: A+/A−/B+/B−/C+/C−/D+/D−</td><td>bit0~3: A+/A−/B+/B−, bit7: D−, bit4~6: 0</td></tr>
+  <tr><td>1</td><td>bit0~4: RY3~RY7, bit5: 0, bit6: PB0, bit7: PB1</td><td>bit0~5: RY3~RY8, bit6~7: 0</td></tr>
+  <tr><td>2</td><td>ADC1 (ladcValue[0]), 0~255</td><td>0</td></tr>
+  <tr><td>3</td><td>ADC2 (ladcValue[1]), 0~255</td><td>0</td></tr>
+  <tr><td>4</td><td>1 (DM_DRIVER)</td><td>2 (FND_DRIVER)</td></tr>
+  <tr><td>5~7</td><td>예약, 0</td><td>예약, 0</td></tr>
+</table>
+<p>입력은 LOW=1, 출력은 실제 출력 래치 HIGH=1입니다(브레이크 체결 여부와 구분).
+ADC는 0~4095 범위 제한 후 4비트 우측 시프트하여 256단계로 전송합니다.
+상위 LCD에서 확장 데이터를 사용하려면 0x5B9 수신 파서를 추가해야 합니다. 이 변경은 드라이버 송신만 적용합니다.</p>
+<p>충돌 리미트를 포함한 입력은 상위로 상태만 전달하며, 드라이버 내부에서 모터 정지나 주행 차단에 사용하지 않습니다.
+정지 판단은 상위에서 수행합니다. 기존 0x5A0 및 0x5B8 포맷은 변경하지 않습니다.
+DM_DRIVER에서는 FND 표시 대신 CAN 오류 코드와 UART 로그로 상태를 확인합니다.</p>
+
 <h2 id="motor">8. 모터 명령 처리</h2>
 <table>
   <tr><th>항목</th><th>현재 설정 및 동작</th><th>관련 정의/주기</th></tr>
-  <tr><td>명령 입력</td><td>로컬/CAN 목표를 -1.0~+1.0 PWM으로 제한한 후 좌·우 모터 공통 명령 FIFO에 저장</td><td>FIFO 명령 반영 50ms, PWM 램프 계산 10ms</td></tr>
+  <tr><td>명령 입력</td><td>CAN 목표만 -1.0~+1.0 PWM으로 제한한 후 좌·우 모터 공통 명령 FIFO에 저장</td><td>FIFO 명령 반영 50ms, PWM 램프 계산 10ms</td></tr>
   <tr><td>가속 프로파일</td><td><strong>기본값: 선형 가속</strong>. 동일 방향에서 목표 절대값이 증가할 때 일정 기울기로 PWM 증가</td><td><code>PWM_ACCEL_PROFILE_LINEAR</code></td></tr>
   <tr><td>선형 가속시간</td><td>0→100%는 2.0초, 0→50%는 1.0초. 목표가 변경되면 현재 PWM부터 연속적으로 추종</td><td><code>ACCEL_DURATION_10MS_TICKS=200</code></td></tr>
   <tr><td>S-curve 선택</td><td>선형 정의를 주석 처리하고 S-curve 정의를 활성화하면 smoothstep(<code>3t²-2t³</code>) 가속 사용</td><td><code>PWM_ACCEL_PROFILE_S_CURVE</code></td></tr>
-  <tr><td>기본 감속</td><td>최대속도 1m/s, 정지거리 0.75m 기준의 선형 감속. 100%→0% 약 1.5초</td><td><code>STOP_DISTANCE_M=0.75</code>, 10ms마다 약 0.00667 PWM 감소</td></tr>
+  <tr><td>기본 감속</td><td>모델 고정 100%→0% 약3초. DC-Link 보호가 개입하면 길어질 수 있음</td><td><code>SystemModel::DECEL_MS=3000</code>, 10ms마다 약0.00333 PWM 감소</td></tr>
   <tr><td>회생전압 감속 제한</td><td>정지 진입 전압의 103%부터 감속률을 줄이고, 110% 이상에서는 최소 감속 또는 BEMF 방향 PWM 보정으로 DC-Link 상승 억제</td><td><code>DECEL_VDC_SLOW_RATIO=1.03</code>, <code>DECEL_VDC_HOLD_RATIO=1.10</code></td></tr>
   <tr><td>방향 전환</td><td>현재 방향 PWM을 0까지 감속하고 100ms 브리지 안정화 후 반대 방향 가속 시작</td><td>10ms × 10회</td></tr>
   <tr><td>브레이크 연동</td><td>정지 램프 완료 후 단락 제동을 적용. 단락 제동 중 램프 상태를 0으로 초기화하여 해제 시 PWM 급상승 방지</td><td>전자브레이크 기본 지연 300ms</td></tr>
@@ -247,6 +301,12 @@ UART에 <code>### AS-CAN MODE (CON1 4-5 jumper detected) ###</code>가 출력됩
 <div class="info">가속 방식 변경: <code>class/data_class/dataclass.h</code>에서 두 프로파일 중 하나만 정의해야 합니다. 두 항목을 동시에 정의하거나 모두 해제하면 컴파일 오류가 발생합니다.</div>
 
 <h3>8.1 RPM PI 제어의 저속 비활성 구간</h3>
+<p>모델 클래스의 <code>PID_CONTROL_CONFIG</code> typedef로 PID 설정을 묶어 사용합니다.
+<code>PID</code> 초기화 순서는 <code>disable, Kp, Ki, Kd</code>이며 기본값은
+<code>{false, 0.8f, 0.1f, 0.0f}</code>입니다. 첫 값을 <code>true</code>로 변경하면
+상위 CAN 명령과 관계없이 PID 보정을 사용하지 않습니다.
+실제 비활성 조건은 모델 <code>PID.disable</code> 또는 CAN <code>disablePID</code>입니다.
+비활성 시 PID 보정·적분을 초기화하며 가감속, 브레이크, 속도 측정 및 보호 기능은 유지합니다.</p>
 <p>현재 속도 제어는 BEMF(역기전력)를 ADC로 측정하여 실제 RPM을 계산하고, 목표 RPM과의 오차를 PI 보정 PWM으로 변환합니다. 그러나 저속에서는 BEMF 전압이 작아 ADC 오프셋, PWM 스위칭 노이즈 및 모터 리플의 영향이 상대적으로 커지므로 RPM 측정 신뢰도가 낮습니다. 이 구간에서 PI를 사용하면 측정 노이즈를 실제 속도오차로 판단하여 급격한 PWM 보정, 헌팅, 적분 누적, 정지 부근의 미세 구동 또는 좌우 속도 불균형이 발생할 수 있습니다.</p>
 <table>
   <tr><th>속도 조건</th><th>PI 상태</th><th>제어 동작</th><th>설계 목적</th></tr>
@@ -261,12 +321,12 @@ UART에 <code>### AS-CAN MODE (CON1 4-5 jumper detected) ###</code>가 출력됩
 <table>
   <tr><th>보호</th><th>조건</th><th>동작</th><th>FND</th></tr>
   <tr><td>션트 과전류 (DC-Link 단락)</td><td>PA2 ADC 워치독 임계 초과 + DC-Link 전압 동반 붕괴 (24V: 2000, 48V: 2500 ADC)</td><td><strong>즉시 SD 차단 + MC1/MC2 개방</strong> (하드웨어 인터럽트)</td><td>7</td></tr>
-  <tr><td>홀 전류 과전류</td><td>80A 이상 지속</td><td>PWM 차단 → 대기 후 재시도, <strong>3회 초과 시 전원 차단</strong></td><td>9</td></tr>
+  <tr><td>홀 전류 과전류</td><td>모델 고정120A 이상 지속</td><td>PWM 차단 → 대기 후 재시도, <strong>3회 도달 시 전원 차단</strong></td><td>9</td></tr>
   <tr><td>FET 과온</td><td>85°C 디레이트 시작 / 100°C 차단 / 80°C 이하 자동 복귀</td><td>PWM 축소·차단 (릴레이는 유지)</td><td>3</td></tr>
-  <tr><td>저전압 / 과전압</td><td>24V 모드: 21.0V 미만 / 30.0V 초과 (48V 모드는 자동 스케일)</td><td>에러 표시</td><td>1 / 2</td></tr>
+  <tr><td>저전압 / 과전압</td><td>24V:21/30V, 상위가48V 선택 시42/60V. 자동 전환 없음</td><td>에러 표시</td><td>1 / 2</td></tr>
   <tr><td>모터 온도 / Fault</td><td>모터 NTC 초과 / fault 신호</td><td>에러 표시</td><td>4 / 5·6</td></tr>
   <tr><td>CAN 통신 두절</td><td>정상 구동 프레임 수신 후 300ms 이상 무수신</td><td>안전 정지 및 통신 복구 대기</td><td>8</td></tr>
-  <tr><td>비상정지</td><td>CAN btn.emergency 또는 로컬 입력</td><td>power_off (전 릴레이 개방)</td><td>-</td></tr>
+  <tr><td>비상정지</td><td>CAN btn.emergency 또는0x703</td><td>power_off (전 릴레이 개방)</td><td>-</td></tr>
   <tr><td>IWDG</td><td>메인루프 정지 시 약 12.8초</td><td>MCU 리셋</td><td>-</td></tr>
 </table>
 
@@ -290,7 +350,7 @@ CAN 구동 프레임이 정상 수신되는 동안 소수점(DP)이 1초 주기�
 <table>
   <tr><th>로그</th><th>시점</th><th>내용</th></tr>
   <tr><td><code>===MAIN START===</code></td><td>부팅</td><td>펌웨어 시작</td></tr>
-  <tr><td><code>### AS-CAN MODE ... ###</code></td><td>부팅</td><td>4-5 점퍼 감지 시</td></tr>
+  <tr><td><code>### MODEL STM32_SB100D_BJ: CAN INPUT ONLY ###</code></td><td>부팅</td><td>고정 모델·CAN 전용 선택</td></tr>
   <tr><td><code>#CAN RX type[..] L[..] R[..] ...</code></td><td>CAN 수신 시</td><td>첫 5프레임 + 이후 약 1초당 1회. type: 1=방제차, 2=리프트, 3=AS</td></tr>
   <tr><td><code>SHUNT TRIP: adc=.. thr=.. vdc=..</code></td><td>션트 보호 트립</td><td>트립 ADC값/임계값/DC-Link 전압</td></tr>
   <tr><td><code>### FET TEMP ... ###</code></td><td>FET 온도 보호</td><td>차단/자동복귀</td></tr>
@@ -303,8 +363,8 @@ CAN 구동 프레임이 정상 수신되는 동안 소수점(DP)이 1초 주기�
   <tr><td>메인 릴레이(MC1)가 안 붙음</td><td>① FND 7/9 여부(보호 트립) ② ULN2003 입력·출력, COM(9번) 코일 전원 ③ PD2 핀 대GND 저항(정상: 수십 kΩ 이상) — 2Ω 수준이면 드라이버 또는 MCU 핀 단락</td></tr>
   <tr><td>CAN 수신 안 됨</td><td>① 마스터 비트레이트 500kbps 확인 ② CAN_H/L 배선·종단 ③ 트랜시버 U6 VCC(3.3V)·D(1번)·R(4번) 신호 ④ MCU 교체 이력이 있으면 PA11/PA12 납땜</td></tr>
   <tr><td>수신은 되는데 마스터가 응답(0x5B8)을 못 받음</td><td>이 노드의 TX 경로 점검: PA12 → U6 D(1번) 도통, ACK 펄스 유무 (수신만 되고 송신이 안 되면 버스 에러 카운터가 포화되어 결국 수신도 멈춤)</td></tr>
-  <tr><td>AS 모드로 진입 안 됨</td><td>① CON1 4-5 점퍼 접촉 ② 부팅 로그에 AS-CAN MODE 표시 여부 ③ PA8 전압 (점퍼 시 3.3V)</td></tr>
-  <tr><td>CAN 두절 시 이상 거동</td><td>일반 모드: 300ms 후 로컬 복귀가 정상. AS 모드: 정지 유지가 정상(로컬 레버 무반응은 의도된 안전 동작)</td></tr>
+  <tr><td>CAN 전용으로 동작 안 됨</td><td>SYSTEM_MODEL_NAME과 부팅 MODEL 로그 및 실제 플래시한 BIN을 확인하십시오. PA8은 미사용입니다.</td></tr>
+  <tr><td>CAN 두절 시 이상 거동</td><td>모든 CAN 주행 ID에서300ms 후 정지 유지가 정상입니다. 로컬 입력 무반응은 모델 정책입니다.</td></tr>
 </table>
 
 </div>
